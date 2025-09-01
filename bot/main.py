@@ -4,7 +4,8 @@ import asyncio
 import traceback
 import psutil
 from datetime import datetime
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Импортируем наши модули
@@ -24,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Словарь для хранения сессий администратора (добавили!)
+# Словарь для хранения сессий администратора
 admin_sessions = {}
 
 # Функция для детального логирования ошибок
@@ -51,12 +52,17 @@ def get_memory_usage():
         'percent': process.memory_percent()
     }
 
-# Проверка прав администратора (новая функция!)
+# Проверка прав администратора
 def is_admin(user_id):
     """Проверяет, является ли пользователь администратором"""
     if config.ADMIN_USER_ID == 0:
         return False  # Админ не настроен
     return user_id == config.ADMIN_USER_ID or admin_sessions.get(user_id, False)
+
+# Проверка режима администратора
+def is_in_admin_mode(user_id):
+    """Проверяет, находится ли пользователь в режиме администратора (активная сессия)"""
+    return admin_sessions.get(user_id, False)
 
 # Глобальный обработчик ошибок
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -83,10 +89,15 @@ except Exception as e:
     logger.error(f"❌ Ошибка инициализации Vosk: {e}")
     recognizer = None
 
-# НОВАЯ КОМАНДА: /admin (добавили!)
+# Команда: /admin
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /admin"""
     user = update.effective_user
+    
+    # Проверяем права администратора (не режим!)
+    if user.id != config.ADMIN_USER_ID and config.ADMIN_USER_ID != 0:
+        await update.message.reply_text("❌ У вас нет прав администратора!")
+        return
     
     # Проверяем пароль
     if len(context.args) == 0:
@@ -110,7 +121,7 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=config.ADMIN_MENU
     )
 
-# НОВАЯ ФУНКЦИЯ: обработка админ-меню (добавили!)
+# Обработка админ-меню
 async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик сообщений в режиме администратора"""
     user = update.effective_user
@@ -174,8 +185,9 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
         # Здесь будет код остановки
         
     elif text == "🔙 Назад":
-        del admin_sessions[user.id]
-        db.end_admin_session(user.id)
+        if user.id in admin_sessions:
+            del admin_sessions[user.id]
+            db.end_admin_session(user.id)
         await update.message.reply_text(
             "🔙 Возврат в обычный режим",
             reply_markup=config.MAIN_MENU
@@ -184,7 +196,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         await update.message.reply_text("Неизвестная команда админа")
 
-# Остальные функции остаются без изменений...
+# Остальные функции
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
@@ -272,7 +284,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     user = update.effective_user
     
     # Проверяем, находится ли пользователь в режиме админа
-    if is_admin(user.id):
+    if is_in_admin_mode(user.id):
         await handle_admin_message(update, context)
         return
         
@@ -297,6 +309,17 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик аудиосообщений и аудиофайлов"""
+    user = update.effective_user
+    
+    # Если пользователь в режиме админа - игнорируем аудио
+    if is_in_admin_mode(user.id):
+        await update.message.reply_text(
+            "❌ В режиме администратора распознавание аудио недоступно.\n"
+            "Нажмите '🔙 Назад' для возврата в обычный режим.",
+            reply_markup=config.ADMIN_MENU
+        )
+        return
+
     # ПРОВЕРКА: есть ли распознаватель
     if not recognizer:
         error_msg = "Распознаватель Vosk не инициализирован"
@@ -408,11 +431,14 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def post_init(application):
     """Регистрация команд в меню бота"""
-    commands = config.COMMANDS + [("admin", "Панель администратора")]  # Добавили команду админа
+    commands = config.COMMANDS + [("admin", "Панель администратора")]
     await application.bot.set_my_commands(commands)
 
 def main():
     """Основная функция запуска бота"""
+    # Очищаем все активные админ-сессии при запуске
+    admin_sessions.clear()
+    
     if not config.TELEGRAM_BOT_TOKEN:
         logger.error("Токен бота не найден! Проверьте файл .env")
         return
@@ -434,7 +460,7 @@ def main():
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("stats", stats_command))
         application.add_handler(CommandHandler("settings", settings_command))
-        application.add_handler(CommandHandler("admin", admin_command))  # Добавили админ-команду
+        application.add_handler(CommandHandler("admin", admin_command))
         application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
         

@@ -40,7 +40,7 @@ class Database:
                 )
             ''')
             
-            # Новая таблица для админов (добавили!)
+            # Таблица для админов
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS admin_sessions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,15 +102,15 @@ class Database:
             result = cursor.fetchone()
             return result if result else (0, 0, 0, 0)
     
-    # НОВЫЕ ФУНКЦИИ ДЛЯ АДМИНА (добавили!)
+    # Функции для админа
     def get_all_users(self):
         """Возвращает список всех пользователей"""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT users.user_id, users.username, users.first_name, users.last_name, 
-                    COUNT(audio_requests.id) as request_count,
-                    MAX(audio_requests.created_at) as last_activity
+                       COUNT(audio_requests.id) as request_count,
+                       MAX(audio_requests.created_at) as last_activity
                 FROM users 
                 LEFT JOIN audio_requests ON users.user_id = audio_requests.user_id
                 GROUP BY users.user_id
