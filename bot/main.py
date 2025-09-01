@@ -1,6 +1,8 @@
 import os
 import logging
 import asyncio
+import traceback
+from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -13,9 +15,43 @@ from vosk_recognizer import VoskRecognizer
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    handlers=[
+        logging.FileHandler(f'bot_log_{datetime.now().strftime("%Y%m%d")}.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger(__name__)
+
+# Функция для детального логирования ошибок
+def log_error(error_type, error, update=None):
+    """Детальное логирование ошибок"""
+    error_msg = f"❌ {error_type}: {error}"
+    logger.error(error_msg)
+    
+    if update and hasattr(update, 'effective_user'):
+        user_info = f"User: {update.effective_user.id} {update.effective_user.username}"
+        logger.error(f"   {user_info}")
+    
+    logger.error(f"   Traceback: {traceback.format_exc()}")
+    return error_msg
+
+# Глобальный обработчик ошибок
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Глобальный обработчик ошибок"""
+    try:
+        log_error("Global error", context.error, update)
+        
+        if update and update.effective_message:
+            error_text = (
+                "❌ Произошла непредвиденная ошибка.\n"
+                "🛠️ Разработчик уже уведомлен.\n"
+                "🔄 Попробуйте отправить сообщение еще раз."
+            )
+            await update.effective_message.reply_text(error_text)
+            
+    except Exception as e:
+        logger.error(f"Error in error handler: {e}")
 
 # Инициализация распознавателя Vosk
 try:
@@ -82,8 +118,25 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик аудиосообщений и аудиофайлов"""
+    # ПРОВЕРКА: есть ли распознаватель
     if not recognizer:
-        await update.message.reply_text("❌ Ошибка: распознаватель не инициализирован")
+        error_msg = "Распознаватель Vosk не инициализирован"
+        log_error("Vosk not initialized", error_msg, update)
+        await update.message.reply_text(
+            "❌ Бот временно не работает.\n"
+            "🛠️ Ведутся технические работы.\n"
+            "⏳ Попробуйте позже."
+        )
+        return
+
+    # ПРОВЕРКА: доступность модели Vosk
+    if not os.path.exists(config.VOSK_MODEL_PATH):
+        error_msg = f"Модель Vosk не найдена: {config.VOSK_MODEL_PATH}"
+        log_error("Vosk model missing", error_msg, update)
+        await update.message.reply_text(
+            "❌ Ошибка загрузки модели распознавания.\n"
+            "🛠️ Разработчик уже уведомлен."
+        )
         return
     
     user = update.effective_user
@@ -145,25 +198,25 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await processing_msg.edit_text("❌ Не удалось распознать речь")
             
     except Exception as e:
-        logger.error(f"Ошибка обработки аудио: {e}")
+        error_msg = log_error("Audio processing error", e, update)
         try:
-            await processing_msg.edit_text("❌ Произошла ошибка при обработке")
+            await processing_msg.edit_text(
+                "❌ Ошибка при обработке аудио.\n"
+                "⚠️ Возможно, файл поврежден или слишком большой.\n"
+                "🔄 Попробуйте отправить еще раз."
+            )
         except:
-            await update.message.reply_text("❌ Произошла ошибка при обработке")
+            try:
+                await update.message.reply_text(
+                    "❌ Не удалось обработать аудио. Попробуйте еще раз."
+                )
+            except:
+                pass
         
     finally:
         # Очищаем временные файлы
         if temp_audio_path:
             AudioProcessor.cleanup_temp_file(temp_audio_path)
-
-async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик ошибок"""
-    logger.error(f"Ошибка при обработке сообщения: {context.error}")
-    if update and update.effective_message:
-        try:
-            await update.effective_message.reply_text("❌ Произошла ошибка. Попробуйте еще раз.")
-        except:
-            pass
 
 def main():
     """Основная функция запуска бота"""
