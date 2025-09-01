@@ -4,7 +4,7 @@ import asyncio
 import traceback
 import psutil
 from datetime import datetime
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Импортируем наши модули
@@ -87,7 +87,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📎 Максимальный размер файла: 20 МБ"
     )
     
-    await update.message.reply_text(welcome_text)
+    await update.message.reply_text(
+        welcome_text,
+        reply_markup=config.MAIN_MENU
+    )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /help"""
@@ -101,10 +104,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Максимальный размер: 20 МБ\n"
         "• Лучше всего работаю с четкой речью\n"
         "• Поддерживаю только русский язык\n\n"
-        "📊 Статистика: /stats"
+        "📊 Статистика: /stats\n"
+        "⚙️ Настройки: /settings"
     )
     
-    await update.message.reply_text(help_text)
+    await update.message.reply_text(
+        help_text,
+        reply_markup=config.MAIN_MENU
+    )
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /stats"""
@@ -126,7 +133,48 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         stats_text = "📊 Вы еще не отправляли аудио для распознавания."
     
-    await update.message.reply_text(stats_text)
+    await update.message.reply_text(
+        stats_text,
+        reply_markup=config.MAIN_MENU
+    )
+
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /settings"""
+    settings_text = (
+        "⚙️ <b>Настройки бота</b>\n\n"
+        "Доступные опции:\n"
+        "• Автоматическое удаление временных файлов\n"
+        "• Уведомления о новых функциях\n"
+        "• Статистика использования\n\n"
+        "Эти функции находятся в разработке и появятся в ближайшем обновлении! 🚀"
+    )
+    
+    await update.message.reply_text(
+        settings_text,
+        parse_mode='HTML',
+        reply_markup=config.MAIN_MENU
+    )
+
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик текстовых сообщений (кнопок)"""
+    text = update.message.text
+    
+    if text == "🎤 Распознать голос":
+        await update.message.reply_text(
+            "Отправьте мне голосовое сообщение или аудиофайл для распознавания! 🎤",
+            reply_markup=config.MAIN_MENU
+        )
+    elif text == "📊 Статистика":
+        await stats_command(update, context)
+    elif text == "❓ Помощь":
+        await help_command(update, context)
+    elif text == "⚙️ Настройки":
+        await settings_command(update, context)
+    else:
+        await update.message.reply_text(
+            "Не понимаю эту команду. Используйте меню ниже:",
+            reply_markup=config.MAIN_MENU
+        )
 
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик аудиосообщений и аудиофайлов"""
@@ -239,6 +287,10 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.info(f"Память после обработки: {memory_after['rss_mb']:.1f} MB")
         logger.info(f"Использовано памяти: {memory_after['rss_mb'] - memory_before['rss_mb']:.1f} MB")
 
+async def post_init(application):
+    """Регистрация команд в меню бота"""
+    await application.bot.set_my_commands(config.COMMANDS)
+
 def main():
     """Основная функция запуска бота"""
     if not config.TELEGRAM_BOT_TOKEN:
@@ -254,13 +306,15 @@ def main():
     
     try:
         # Создаем приложение
-        application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
+        application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).post_init(post_init).build()
         
         # Добавляем обработчики
         application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("stats", stats_command))
+        application.add_handler(CommandHandler("settings", settings_command))
         application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
         
         # Обработчик ошибок
         application.add_error_handler(error_handler)

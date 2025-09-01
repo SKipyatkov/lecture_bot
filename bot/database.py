@@ -75,6 +75,21 @@ class Database:
             ''', (user_id,))
             result = cursor.fetchone()
             return result if result else (0, 0, 0)
+    
+    def get_global_stats(self):
+        """Возвращает глобальную статистику по всем пользователям"""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT 
+                    COUNT(DISTINCT user_id) as total_users,
+                    COUNT(*) as total_requests,
+                    SUM(file_size) as total_size,
+                    SUM(duration) as total_duration
+                FROM audio_requests
+            ''')
+            result = cursor.fetchone()
+            return result if result else (0, 0, 0, 0)
 
 # Глобал БД
 db = Database()
