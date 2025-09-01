@@ -1,0 +1,3 @@
+python-telegram-bot==21.7
+vosk==0.3.45
+python-dotenv==1.0.0
