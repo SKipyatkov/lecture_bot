@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 import traceback
+import psutil
 from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
@@ -35,6 +36,17 @@ def log_error(error_type, error, update=None):
     
     logger.error(f"   Traceback: {traceback.format_exc()}")
     return error_msg
+
+# Функция для мониторинга памяти
+def get_memory_usage():
+    """Возвращает информацию об использовании памяти"""
+    process = psutil.Process()
+    memory_info = process.memory_info()
+    return {
+        'rss_mb': memory_info.rss / 1024 / 1024,
+        'vms_mb': memory_info.vms / 1024 / 1024,
+        'percent': process.memory_percent()
+    }
 
 # Глобальный обработчик ошибок
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,6 +151,10 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    # Логируем использование памяти перед обработкой
+    memory_before = get_memory_usage()
+    logger.info(f"Память до обработки: {memory_before['rss_mb']:.1f} MB")
+    
     user = update.effective_user
     db.add_user(user.id, user.username, user.first_name, user.last_name)
     
@@ -217,6 +233,11 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Очищаем временные файлы
         if temp_audio_path:
             AudioProcessor.cleanup_temp_file(temp_audio_path)
+        
+        # Логируем использование памяти после обработки
+        memory_after = get_memory_usage()
+        logger.info(f"Память после обработки: {memory_after['rss_mb']:.1f} MB")
+        logger.info(f"Использовано памяти: {memory_after['rss_mb'] - memory_before['rss_mb']:.1f} MB")
 
 def main():
     """Основная функция запуска бота"""

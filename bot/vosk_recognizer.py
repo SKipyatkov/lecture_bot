@@ -1,21 +1,26 @@
 import os
 import json
 import wave
-import tempfile
-import subprocess
 from vosk import Model, KaldiRecognizer
 
 class VoskRecognizer:
     def __init__(self, model_path):
         """
-        Инициализирует распознаватель Vosk с указанной моделью
+        Инициализирует распознаватель Vosk с кэшированием
         """
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Модель Vosk не найдена по пути: {model_path}")
         
         print(f"Загрузка модели Vosk из: {model_path}")
         self.model = Model(model_path)
-        print("Модель Vosk успешно загружена!")
+        self.sample_rate = 16000  # Стандартная частота для Vosk
+        print("Модель Vosk успешно загружена и кэширована!")
+    
+    def create_recognizer(self):
+        """
+        Создает новый распознаватель с кэшированной моделью
+        """
+        return KaldiRecognizer(self.model, self.sample_rate)
     
     def recognize_audio(self, audio_path):
         """
@@ -25,16 +30,16 @@ class VoskRecognizer:
             return "Ошибка: аудиофайл не найден"
         
         try:
-            # Открываем файл
+            # Открываем аудиофайл
             with wave.open(audio_path, "rb") as wf:
-                # формат аудио
+                # Проверяем формат аудио
                 if (wf.getnchannels() != 1 or 
                     wf.getsampwidth() != 2 or 
                     wf.getcomptype() != "NONE"):
                     return "Ошибка: неверный формат аудио"
                 
-                # Создаем распознаватель
-                rec = KaldiRecognizer(self.model, wf.getframerate())
+                # Создаем распознаватель из кэшированной модели
+                rec = self.create_recognizer()
                 rec.SetWords(True)
                 
                 results = []
