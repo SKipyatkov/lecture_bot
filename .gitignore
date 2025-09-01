@@ -1,32 +1,31 @@
-# Виртуальное окружение
+# Virtual environment
 venv/
-.env/
+.env
 
-# Файлы Python
+# Vosk models
+models/
+
+# Database
+*.db
+*.sqlite3
+
+# Audio files
+*.ogg
+*.wav
+*.mp3
+*.m4a
+
+# Logs
+*.log
+
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Базы данных
-*.db
-*.sqlite3
-
-# Временные файлы
+# Temporary files
 *.tmp
 *.temp
-
-# Модели Vosk (их не выгружаем - они большие)
-models/
-
-# Аудио файлы
-*.ogg
-*.wav
-*.mp3
-
-# Системные файлы
 .DS_Store
 Thumbs.db
-
-# Логи
-*.log
