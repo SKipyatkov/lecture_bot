@@ -2,3 +2,6 @@ python-telegram-bot==21.7
 vosk==0.3.45
 python-dotenv==1.0.0
 psutil==5.9.5
+cryptography==41.0.7
+pyspellchecker==0.7.2
+langdetect==1.0.9

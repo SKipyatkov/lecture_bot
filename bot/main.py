@@ -24,6 +24,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Словарь для хранения сессий администратора (добавили!)
+admin_sessions = {}
+
 # Функция для детального логирования ошибок
 def log_error(error_type, error, update=None):
     """Детальное логирование ошибок"""
@@ -47,6 +50,13 @@ def get_memory_usage():
         'vms_mb': memory_info.vms / 1024 / 1024,
         'percent': process.memory_percent()
     }
+
+# Проверка прав администратора (новая функция!)
+def is_admin(user_id):
+    """Проверяет, является ли пользователь администратором"""
+    if config.ADMIN_USER_ID == 0:
+        return False  # Админ не настроен
+    return user_id == config.ADMIN_USER_ID or admin_sessions.get(user_id, False)
 
 # Глобальный обработчик ошибок
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73,6 +83,108 @@ except Exception as e:
     logger.error(f"❌ Ошибка инициализации Vosk: {e}")
     recognizer = None
 
+# НОВАЯ КОМАНДА: /admin (добавили!)
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды /admin"""
+    user = update.effective_user
+    
+    # Проверяем пароль
+    if len(context.args) == 0:
+        await update.message.reply_text(
+            "🔐 Введите пароль администратора:\n"
+            "Пример: /admin ваш_пароль"
+        )
+        return
+    
+    password = context.args[0]
+    if password != config.ADMIN_PASSWORD:
+        await update.message.reply_text("❌ Неверный пароль администратора!")
+        return
+    
+    # Сохраняем сессию администратора
+    admin_sessions[user.id] = True
+    db.add_admin_session(user.id)
+    
+    await update.message.reply_text(
+        "👑 Добро пожаловать в панель администратора!",
+        reply_markup=config.ADMIN_MENU
+    )
+
+# НОВАЯ ФУНКЦИЯ: обработка админ-меню (добавили!)
+async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик сообщений в режиме администратора"""
+    user = update.effective_user
+    
+    if not is_admin(user.id):
+        await update.message.reply_text("❌ Доступ запрещен!")
+        return
+    
+    text = update.message.text
+    
+    if text == "📊 Общая статистика":
+        stats = db.get_global_stats()
+        total_users, total_requests, total_size, total_duration = stats
+        
+        stats_text = (
+            f"📊 Глобальная статистика:\n\n"
+            f"• Всего пользователей: {total_users}\n"
+            f"• Всего запросов: {total_requests}\n"
+            f"• Общий объем данных: {total_size / (1024*1024):.1f} МБ\n"
+            f"• Общая длительность: {total_duration / 60:.1f} минут\n"
+            f"• Активных сессий админа: {len(admin_sessions)}"
+        )
+        await update.message.reply_text(stats_text)
+        
+    elif text == "👥 Пользователи":
+        users = db.get_all_users()
+        if not users:
+            await update.message.reply_text("📝 Пользователей пока нет.")
+            return
+        
+        users_text = "👥 Список пользователей:\n\n"
+        for i, user in enumerate(users[:10], 1):  # Показываем первых 10
+            user_id, username, first_name, last_name, requests, last_active = user
+            users_text += f"{i}. {first_name} {last_name} (@{username})\n"
+            users_text += f"   ID: {user_id}, Запросов: {requests}\n"
+            users_text += f"   Последняя активность: {last_active}\n\n"
+        
+        if len(users) > 10:
+            users_text += f"... и еще {len(users) - 10} пользователей"
+        
+        await update.message.reply_text(users_text)
+        
+    elif text == "📋 Логи":
+        try:
+            log_file = f'bot_log_{datetime.now().strftime("%Y%m%d")}.log'
+            if os.path.exists(log_file):
+                with open(log_file, 'r', encoding='utf-8') as f:
+                    logs = f.read()[-4000:]  # Последние 4000 символов
+                await update.message.reply_text(f"📋 Последние логи:\n\n```\n{logs}\n```", parse_mode='Markdown')
+            else:
+                await update.message.reply_text("📋 Файл логов не найден.")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Ошибка чтения логов: {e}")
+            
+    elif text == "🔄 Перезагрузка":
+        await update.message.reply_text("🔄 Перезагрузка бота...")
+        # Здесь будет код перезагрузки
+        
+    elif text == "⏹️ Остановка":
+        await update.message.reply_text("⏹️ Остановка бота...")
+        # Здесь будет код остановки
+        
+    elif text == "🔙 Назад":
+        del admin_sessions[user.id]
+        db.end_admin_session(user.id)
+        await update.message.reply_text(
+            "🔙 Возврат в обычный режим",
+            reply_markup=config.MAIN_MENU
+        )
+        
+    else:
+        await update.message.reply_text("Неизвестная команда админа")
+
+# Остальные функции остаются без изменений...
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
@@ -157,6 +269,13 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений (кнопок)"""
+    user = update.effective_user
+    
+    # Проверяем, находится ли пользователь в режиме админа
+    if is_admin(user.id):
+        await handle_admin_message(update, context)
+        return
+        
     text = update.message.text
     
     if text == "🎤 Распознать голос":
@@ -289,7 +408,8 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def post_init(application):
     """Регистрация команд в меню бота"""
-    await application.bot.set_my_commands(config.COMMANDS)
+    commands = config.COMMANDS + [("admin", "Панель администратора")]  # Добавили команду админа
+    await application.bot.set_my_commands(commands)
 
 def main():
     """Основная функция запуска бота"""
@@ -303,6 +423,7 @@ def main():
     
     print("🚀 Запуск бота...")
     print(f"📊 Модель Vosk: {config.VOSK_MODEL_PATH}")
+    print(f"👑 Админ ID: {config.ADMIN_USER_ID}")
     
     try:
         # Создаем приложение
@@ -313,6 +434,7 @@ def main():
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("stats", stats_command))
         application.add_handler(CommandHandler("settings", settings_command))
+        application.add_handler(CommandHandler("admin", admin_command))  # Добавили админ-команду
         application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
         
