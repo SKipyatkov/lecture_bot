@@ -2,6 +2,9 @@ import os
 import json
 import wave
 from vosk import Model, KaldiRecognizer
+import logging
+
+logger = logging.getLogger(__name__)
 
 class VoskRecognizer:
     def __init__(self, model_path):
@@ -11,10 +14,10 @@ class VoskRecognizer:
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Модель Vosk не найдена по пути: {model_path}")
         
-        print(f"Загрузка модели Vosk из: {model_path}")
+        logger.info(f"Загрузка модели Vosk из: {model_path}")
         self.model = Model(model_path)
-        self.sample_rate = 16000  # Стандартная частота для Vosk
-        print("Модель Vosk успешно загружена и кэширована!")
+        self.sample_rate = 16000
+        logger.info("Модель Vosk успешно загружена и кэширована!")
     
     def create_recognizer(self):
         """
@@ -22,7 +25,7 @@ class VoskRecognizer:
         """
         return KaldiRecognizer(self.model, self.sample_rate)
     
-    def recognize_audio(self, audio_path):
+    def recognize_audio(self, audio_path, language='ru'):
         """
         Распознает речь из аудиофайла и возвращает текст
         """
@@ -38,7 +41,7 @@ class VoskRecognizer:
                     wf.getcomptype() != "NONE"):
                     return "Ошибка: неверный формат аудио"
                 
-                # Создаем распознаватель из кэшированной модели
+                # Создаем распознаватель
                 rec = self.create_recognizer()
                 rec.SetWords(True)
                 
@@ -66,4 +69,5 @@ class VoskRecognizer:
                 return full_text if full_text else "Не удалось распознать речь"
                 
         except Exception as e:
+            logger.error(f"Ошибка распознавания: {e}")
             return f"Ошибка при распознавании: {str(e)}"

@@ -9,37 +9,37 @@ class AudioProcessor:
     @staticmethod
     def convert_to_wav(audio_path, output_path):
         """
-        Конвертирует аудиофайл в WAV формат с оптимизацией памяти
+        Конвертирует аудиофайл в WAV формат (16kHz, mono) для Vosk
+        Используем subprocess вместо ffmpeg-python
         """
         try:
             logger.info(f"Конвертация: {audio_path} -> {output_path}")
             
+            # Исходный файл
             if not os.path.exists(audio_path):
                 logger.error(f"Исходный файл не существует: {audio_path}")
                 return False
             
-            # Оптимизированная команда ffmpeg с буферизацией
+            # subprocess для вызова ffmpeg
             command = [
                 'ffmpeg',
-                '-i', audio_path,
-                '-ac', '1',
-                '-ar', '16000',
-                '-acodec', 'pcm_s16le',
-                '-threads', '2',  # Ограничиваем потоки для экономии памяти
-                '-y',
-                output_path
+                '-i', audio_path,      # входной файл
+                '-ac', '1',            # моно
+                '-ar', '16000',        # 16 kHz
+                '-acodec', 'pcm_s16le', # 16-bit PCM
+                '-y',                  # перезаписать выходной файл
+                output_path            # выходной файл
             ]
             
-            # Запускаем с ограничением памяти
             result = subprocess.run(
                 command,
                 capture_output=True,
                 text=True,
-                timeout=30,
-                env={**os.environ, 'FFMPEG_BINARY': 'ffmpeg'}
+                timeout=30
             )
             
             if result.returncode == 0:
+                # Проверяем что выходной файл создан и не пустой
                 if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
                     logger.info(f"Конвертация успешна, размер: {os.path.getsize(output_path)} байт")
                     return True
@@ -64,13 +64,13 @@ class AudioProcessor:
         """
         logger.info(f"Обработка аудио файла: {audio_file.file_id}")
         
-        # Создаем временный файл для конвертации
+        # Временный файл для конвертации
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
             temp_wav_path = temp_file.name
         
         input_path = None
         try:
-            # Скачиваем файл во временную директорию
+            # Файл в дир
             with tempfile.NamedTemporaryFile(suffix='.ogg', delete=False) as temp_input:
                 input_path = temp_input.name
                 logger.info(f"Скачивание файла в: {input_path}")
@@ -78,17 +78,16 @@ class AudioProcessor:
                 # Скачиваем файл
                 await audio_file.download_to_drive(input_path)
                 
-                # Проверяем что файл скачался
                 if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
                     logger.error("Файл не скачался или пустой")
                     return None
                 
                 logger.info(f"Файл скачан, размер: {os.path.getsize(input_path)} байт")
             
-            # Конвертируем в нужный формат
+            # Конверт в нужный формат
             success = AudioProcessor.convert_to_wav(input_path, temp_wav_path)
             
-            # Удаляем временный входной файл
+            # Удаляем временный файл
             try:
                 os.unlink(input_path)
             except:
@@ -129,22 +128,20 @@ class AudioProcessor:
     @staticmethod
     def get_audio_duration(audio_path):
         """
-        Оптимизированное получение длительности аудио
+        Получает длительность аудиофайла в секундах
         """
         try:
-            # Быстрый способ через ffprobe
+            # Используем ffprobe для получения длительности
             result = subprocess.run([
                 'ffprobe', 
                 '-v', 'error',
                 '-show_entries', 'format=duration',
                 '-of', 'default=noprint_wrappers=1:nokey=1',
                 audio_path
-            ], capture_output=True, text=True, timeout=10)
+            ], capture_output=True, text=True)
             
             if result.returncode == 0:
                 return float(result.stdout.strip())
             return 0
-        except (subprocess.TimeoutExpired, ValueError):
-            return 0
-        except Exception:
+        except:
             return 0

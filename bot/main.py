@@ -13,6 +13,7 @@ from config import config
 from database import db
 from audio_processor import AudioProcessor
 from vosk_recognizer import VoskRecognizer
+from text_enhancer import text_enhancer  # НОВЫЙ ИМПОРТ
 
 # Настройка логирования
 logging.basicConfig(
@@ -27,6 +28,9 @@ logger = logging.getLogger(__name__)
 
 # Словарь для хранения сессий администратора
 admin_sessions = {}
+
+# Словарь для хранения языков пользователей (НОВОЕ!)
+user_languages = {}
 
 # Функция для детального логирования ошибок
 def log_error(error_type, error, update=None):
@@ -64,6 +68,11 @@ def is_in_admin_mode(user_id):
     """Проверяет, находится ли пользователь в режиме администратора (активная сессия)"""
     return admin_sessions.get(user_id, False)
 
+# Получение языка пользователя (НОВАЯ ФУНКЦИЯ)
+def get_user_language(user_id):
+    """Возвращает язык пользователя"""
+    return user_languages.get(user_id, config.DEFAULT_LANGUAGE)
+
 # Глобальный обработчик ошибок
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Глобальный обработчик ошибок"""
@@ -88,6 +97,19 @@ try:
 except Exception as e:
     logger.error(f"❌ Ошибка инициализации Vosk: {e}")
     recognizer = None
+
+# Команда: /language (НОВАЯ КОМАНДА)
+async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик команды для смены языка"""
+    user = update.effective_user
+    
+    await update.message.reply_text(
+        "🌍 Выберите язык распознавания:\n\n"
+        "• 🇷🇺 Русский - для лекций на русском\n"
+        "• 🇺🇸 English - для английских лекций\n\n"
+        "Бот автоматически определит язык, но выбор приоритетного языка улучшит точность!",
+        reply_markup=config.LANGUAGE_MENU
+    )
 
 # Команда: /admin
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -196,7 +218,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         await update.message.reply_text("Неизвестная команда админа")
 
-# Остальные функции
+# Команда: /start
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
@@ -207,7 +229,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📝 Просто отправь мне голосовое сообщение или аудиофайл, "
         "и я преобразую его в текст с помощью локальной нейросети!\n\n"
         "⚡ Работаю полностью оффлайн и бесплатно!\n"
-        "🇷🇺 Поддерживаю русский язык\n\n"
+        "🌍 Поддерживаю русский и английский языки\n"
+        "✨ Автоматически исправляю опечатки и добавляю пунктуацию!\n\n"
         "📎 Максимальный размер файла: 20 МБ"
     )
     
@@ -223,13 +246,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "1. 🎤 Отправь голосовое сообщение\n"
         "2. 📎 Или отправь аудиофайл (MP3, OGG, WAV)\n"
         "3. ⏳ Подожди 10-60 секунд\n"
-        "4. 📝 Получи распознанный текст!\n\n"
-        "⚠️ Ограничения:\n"
-        "• Максимальный размер: 20 МБ\n"
-        "• Лучше всего работаю с четкой речью\n"
-        "• Поддерживаю только русский язык\n\n"
+        "4. 📝 Получи улучшенный текст с пунктуацией!\n\n"
+        "✨ Новые возможности:\n"
+        "• 🤖 Автоисправление опечаток\n"
+        "• 📝 Автоматическая пунктуация\n"
+        "• 🌍 Поддержка русского и английского\n"
+        "• 🧠 Умные контекстные исправления\n\n"
         "📊 Статистика: /stats\n"
-        "⚙️ Настройки: /settings"
+        "⚙️ Настройки: /settings\n"
+        "🌍 Язык: /language"
     )
     
     await update.message.reply_text(
@@ -269,8 +294,9 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Доступные опции:\n"
         "• Автоматическое удаление временных файлов\n"
         "• Уведомления о новых функциях\n"
-        "• Статистика использования\n\n"
-        "Эти функции находятся в разработке и появятся в ближайшем обновлении! 🚀"
+        "• Статистика использования\n"
+        "• Выбор языка распознавания (/language)\n\n"
+        "Больше настроек появится в ближайшем обновлении! 🚀"
     )
     
     await update.message.reply_text(
@@ -301,6 +327,27 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await help_command(update, context)
     elif text == "⚙️ Настройки":
         await settings_command(update, context)
+    elif text == "🌍 Язык":
+        await language_command(update, context)
+    elif text == "🇷🇺 Русский":
+        user_languages[user.id] = 'ru'
+        await update.message.reply_text(
+            "✅ Язык изменен на русский\n"
+            "Теперь бот будет лучше распознавать русскую речь!",
+            reply_markup=config.MAIN_MENU
+        )
+    elif text == "🇺🇸 English":
+        user_languages[user.id] = 'en'
+        await update.message.reply_text(
+            "✅ Language changed to English\n"
+            "The bot will now better recognize English speech!",
+            reply_markup=config.MAIN_MENU
+        )
+    elif text == "🔙 Назад":
+        await update.message.reply_text(
+            "🔙 Возврат в главное меню",
+            reply_markup=config.MAIN_MENU
+        )
     else:
         await update.message.reply_text(
             "Не понимаю эту команду. Используйте меню ниже:",
@@ -389,6 +436,21 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Распознаем речь
         recognized_text = recognizer.recognize_audio(temp_audio_path)
         
+        # УЛУЧШАЕМ ТЕКСТ! (НОВЫЙ КОД)
+        if recognized_text and "Ошибка" not in recognized_text and "Не удалось" not in recognized_text:
+            try:
+                # Получаем ключевые слова из предыдущих сообщений пользователя
+                context_words = []  # пока пустой список
+                
+                # УЛУЧШАЕМ ТЕКСТ!
+                enhanced_text = text_enhancer.enhance_text(recognized_text, context_words)
+                recognized_text = enhanced_text
+                
+                logger.info("✅ Текст успешно улучшен!")
+            except Exception as e:
+                logger.error(f"Ошибка улучшения текста: {e}")
+                # Если улучшение не сработало, используем оригинальный текст
+        
         # Сохраняем в базу данных
         db.add_audio_request(user.id, audio_file.file_id, audio_file.file_size, duration, recognized_text)
         
@@ -431,13 +493,14 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def post_init(application):
     """Регистрация команд в меню бота"""
-    commands = config.COMMANDS + [("admin", "Панель администратора")]
+    commands = config.COMMANDS
     await application.bot.set_my_commands(commands)
 
 def main():
     """Основная функция запуска бота"""
     # Очищаем все активные админ-сессии при запуске
     admin_sessions.clear()
+    user_languages.clear()  # Очищаем языковые настройки
     
     if not config.TELEGRAM_BOT_TOKEN:
         logger.error("Токен бота не найден! Проверьте файл .env")
@@ -450,6 +513,7 @@ def main():
     print("🚀 Запуск бота...")
     print(f"📊 Модель Vosk: {config.VOSK_MODEL_PATH}")
     print(f"👑 Админ ID: {config.ADMIN_USER_ID}")
+    print(f"🌍 Поддерживаемые языки: {config.SUPPORTED_LANGUAGES}")
     
     try:
         # Создаем приложение
@@ -461,6 +525,7 @@ def main():
         application.add_handler(CommandHandler("stats", stats_command))
         application.add_handler(CommandHandler("settings", settings_command))
         application.add_handler(CommandHandler("admin", admin_command))
+        application.add_handler(CommandHandler("language", language_command))  # НОВЫЙ ОБРАБОТЧИК
         application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
         
