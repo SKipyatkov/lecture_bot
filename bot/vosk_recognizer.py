@@ -7,23 +7,42 @@ import logging
 logger = logging.getLogger(__name__)
 
 class VoskRecognizer:
-    def __init__(self, model_path):
+    def __init__(self, model_paths):
         """
-        Инициализирует распознаватель Vosk с кэшированием
+        Инициализирует распознаватель Vosk с поддержкой нескольких языков
         """
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Модель Vosk не найдена по пути: {model_path}")
-        
-        logger.info(f"Загрузка модели Vosk из: {model_path}")
-        self.model = Model(model_path)
+        self.models = {}
         self.sample_rate = 16000
-        logger.info("Модель Vosk успешно загружена и кэширована!")
+        
+        # Загружаем все модели
+        for lang, path in model_paths.items():
+            if not os.path.exists(path):
+                logger.warning(f"Модель Vosk для языка '{lang}' не найдена по пути: {path}")
+                continue
+            
+            try:
+                logger.info(f"Загрузка модели Vosk для языка '{lang}' из: {path}")
+                self.models[lang] = Model(path)
+                logger.info(f"Модель Vosk для языка '{lang}' успешно загружена!")
+            except Exception as e:
+                logger.error(f"Ошибка загрузки модели для языка '{lang}': {e}")
+        
+        if not self.models:
+            raise ValueError("Не удалось загрузить ни одну модель Vosk!")
     
-    def create_recognizer(self):
+    def create_recognizer(self, language='ru'):
         """
-        Создает новый распознаватель с кэшированной моделью
+        Создает новый распознаватель для указанного языка
         """
-        return KaldiRecognizer(self.model, self.sample_rate)
+        if language not in self.models:
+            # Если модель для языка не найдена, используем первую доступную
+            available_languages = list(self.models.keys())
+            if not available_languages:
+                raise ValueError("Нет доступных моделей для распознавания!")
+            language = available_languages[0]
+            logger.warning(f"Модель для языка '{language}' не найдена, используем '{language}'")
+        
+        return KaldiRecognizer(self.models[language], self.sample_rate)
     
     def recognize_audio(self, audio_path, language='ru'):
         """
@@ -41,8 +60,8 @@ class VoskRecognizer:
                     wf.getcomptype() != "NONE"):
                     return "Ошибка: неверный формат аудио"
                 
-                # Создаем распознаватель
-                rec = self.create_recognizer()
+                # Создаем распознаватель для нужного языка
+                rec = self.create_recognizer(language)
                 rec.SetWords(True)
                 
                 results = []
@@ -71,3 +90,9 @@ class VoskRecognizer:
         except Exception as e:
             logger.error(f"Ошибка распознавания: {e}")
             return f"Ошибка при распознавании: {str(e)}"
+    
+    def get_available_languages(self):
+        """
+        Возвращает список доступных языков
+        """
+        return list(self.models.keys())

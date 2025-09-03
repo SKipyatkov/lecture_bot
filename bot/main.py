@@ -3,6 +3,8 @@ import logging
 import asyncio
 import traceback
 import psutil
+import gc
+import torch
 from datetime import datetime
 from telegram import Update
 from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
@@ -13,7 +15,7 @@ from config import config
 from database import db
 from audio_processor import AudioProcessor
 from vosk_recognizer import VoskRecognizer
-from text_enhancer import text_enhancer  # НОВЫЙ ИМПОРТ
+from text_enhancer import text_enhancer
 
 # Настройка логирования
 logging.basicConfig(
@@ -29,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Словарь для хранения сессий администратора
 admin_sessions = {}
 
-# Словарь для хранения языков пользователей (НОВОЕ!)
+# Словарь для хранения языков пользователей
 user_languages = {}
 
 # Функция для детального логирования ошибок
@@ -68,7 +70,7 @@ def is_in_admin_mode(user_id):
     """Проверяет, находится ли пользователь в режиме администратора (активная сессия)"""
     return admin_sessions.get(user_id, False)
 
-# Получение языка пользователя (НОВАЯ ФУНКЦИЯ)
+# Получение языка пользователя
 def get_user_language(user_id):
     """Возвращает язык пользователя"""
     return user_languages.get(user_id, config.DEFAULT_LANGUAGE)
@@ -92,23 +94,39 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Инициализация распознавателя Vosk
 try:
-    recognizer = VoskRecognizer(config.VOSK_MODEL_PATH)
-    logger.info("✅ Модель Vosk успешно загружена!")
+    recognizer = VoskRecognizer(config.VOSK_MODEL_PATHS)
+    logger.info("✅ Модели Vosk успешно загружены!")
+    logger.info(f"Доступные языки: {recognizer.get_available_languages()}")
 except Exception as e:
     logger.error(f"❌ Ошибка инициализации Vosk: {e}")
     recognizer = None
 
-# Команда: /language (НОВАЯ КОМАНДА)
+# Команда: /language
 async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды для смены языка"""
     user = update.effective_user
+    
+    # Проверяем доступные языки в Vosk
+    available_languages = recognizer.get_available_languages() if recognizer else ['ru']
+    
+    keyboard = []
+    if 'ru' in available_languages:
+        keyboard.append(["🇷🇺 Русский"])
+    if 'en' in available_languages:
+        keyboard.append(["🇺🇸 English"])
+    keyboard.append(["🔙 Назад"])
+    
+    language_menu = {
+        "keyboard": keyboard,
+        "resize_keyboard": True
+    }
     
     await update.message.reply_text(
         "🌍 Выберите язык распознавания:\n\n"
         "• 🇷🇺 Русский - для лекций на русском\n"
         "• 🇺🇸 English - для английских лекций\n\n"
         "Бот автоматически определит язык, но выбор приоритетного языка улучшит точность!",
-        reply_markup=config.LANGUAGE_MENU
+        reply_markup=language_menu
     )
 
 # Команда: /admin
@@ -164,7 +182,8 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
             f"• Всего запросов: {total_requests}\n"
             f"• Общий объем данных: {total_size / (1024*1024):.1f} МБ\n"
             f"• Общая длительность: {total_duration / 60:.1f} минут\n"
-            f"• Активных сессий админа: {len(admin_sessions)}"
+            f"• Активных сессий админа: {len(admin_sessions)}\n"
+            f"• Доступные языки Vosk: {', '.join(recognizer.get_available_languages()) if recognizer else 'Нет'}"
         )
         await update.message.reply_text(stats_text)
         
@@ -379,11 +398,12 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ПРОВЕРКА: доступность модели Vosk
-    if not os.path.exists(config.VOSK_MODEL_PATH):
-        error_msg = f"Модель Vosk не найдена: {config.VOSK_MODEL_PATH}"
-        log_error("Vosk model missing", error_msg, update)
+    available_languages = recognizer.get_available_languages()
+    if not available_languages:
+        error_msg = "Нет доступных моделей Vosk"
+        log_error("No Vosk models available", error_msg, update)
         await update.message.reply_text(
-            "❌ Ошибка загрузки модели распознавания.\n"
+            "❌ Ошибка загрузки моделей распознавания.\n"
             "🛠️ Разработчик уже уведомлен."
         )
         return
@@ -413,10 +433,14 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
+    # Получаем выбранный язык пользователя
+    user_language = get_user_language(user.id)
+    
     # Отправляем сообщение о начале обработки
     processing_msg = await update.message.reply_text(
         f"⏳ Обрабатываю {file_type}...\n"
         f"📏 Размер: {audio_file.file_size // 1024} КБ\n"
+        f"🌍 Язык: {user_language.upper()}\n"
         "Это займет некоторое время..."
     )
     
@@ -433,117 +457,120 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Получаем длительность аудио
         duration = AudioProcessor.get_audio_duration(temp_audio_path)
         
-        # Распознаем речь
-        recognized_text = recognizer.recognize_audio(temp_audio_path)
-        
-        # УЛУЧШАЕМ ТЕКСТ! (НОВЫЙ КОД)
+        # Распознаем речь с учетом выбранного языка
+        recognized_text = recognizer.recognize_audio(temp_audio_path, user_language)
+
+        # УЛУЧШАЕМ ТЕКСТ!
         if recognized_text and "Ошибка" not in recognized_text and "Не удалось" not in recognized_text:
             try:
                 # Получаем ключевые слова из предыдущих сообщений пользователя
                 context_words = []  # пока пустой список
                 
-                # УЛУЧШАЕМ ТЕКСТ!
+                # Улучшаем текст
                 enhanced_text = text_enhancer.enhance_text(recognized_text, context_words)
-                recognized_text = enhanced_text
                 
-                logger.info("✅ Текст успешно улучшен!")
+                if enhanced_text and enhanced_text != recognized_text:
+                    recognized_text = enhanced_text
+                    logger.info("✅ Текст успешно улучшен!")
             except Exception as e:
                 logger.error(f"Ошибка улучшения текста: {e}")
-                # Если улучшение не сработало, используем оригинальный текст
-        
-        # Сохраняем в базу данных
+                # Продолжаем с оригинальным текстом
+
+        # Сохраняем запрос в базу данных (ИСПРАВЛЕННАЯ СТРОКА)
         db.add_audio_request(user.id, audio_file.file_id, audio_file.file_size, duration, recognized_text)
-        
-        # Отправляем результат
+
+        # Формируем ответ
         if recognized_text and "Ошибка" not in recognized_text and "Не удалось" not in recognized_text:
-            if len(recognized_text) > 4000:
-                chunks = [recognized_text[i:i+4000] for i in range(0, len(recognized_text), 4000)]
-                for i, chunk in enumerate(chunks, 1):
-                    await update.message.reply_text(f"📝 Часть {i}/{len(chunks)}:\n\n{chunk}")
+            response_text = (
+                f"✅ Распознано успешно!\n"
+                f"⏱️ Длительность: {duration:.1f} сек\n"
+                f"📝 Текст:\n\n{recognized_text}"
+            )
+            
+            # Разбиваем длинный текст на части (ограничение Telegram)
+            if len(response_text) > 4000:
+                parts = [response_text[i:i+4000] for i in range(0, len(response_text), 4000)]
+                for part in parts:
+                    await update.message.reply_text(part)
             else:
-                await processing_msg.edit_text(f"📝 Распознанный текст:\n\n{recognized_text}")
+                await update.message.reply_text(response_text)
+                
         else:
-            await processing_msg.edit_text("❌ Не удалось распознать речь")
+            await update.message.reply_text(
+                "❌ Не удалось распознать речь. Возможно:\n"
+                "• Слишком тихий звук\n"
+                "• Фоновая музыка/шум\n"
+                "• Неподдерживаемый язык\n"
+                "• Слишком короткое сообщение\n\n"
+                "Попробуйте записать в тихом месте с четкой дикцией!"
+            )
             
     except Exception as e:
         error_msg = log_error("Audio processing error", e, update)
-        try:
-            await processing_msg.edit_text(
-                "❌ Ошибка при обработке аудио.\n"
-                "⚠️ Возможно, файл поврежден или слишком большой.\n"
-                "🔄 Попробуйте отправить еще раз."
-            )
-        except:
-            try:
-                await update.message.reply_text(
-                    "❌ Не удалось обработать аудио. Попробуйте еще раз."
-                )
-            except:
-                pass
+        await update.message.reply_text(
+            "❌ Произошла ошибка при обработке аудио.\n"
+            "🛠️ Разработчик уже уведомлен.\n"
+            "🔄 Попробуйте отправить аудио еще раз."
+        )
         
     finally:
-        # Очищаем временные файлы
-        if temp_audio_path:
-            AudioProcessor.cleanup_temp_file(temp_audio_path)
+        # Удаляем временные файлы
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            try:
+                os.remove(temp_audio_path)
+            except:
+                pass
         
         # Логируем использование памяти после обработки
         memory_after = get_memory_usage()
         logger.info(f"Память после обработки: {memory_after['rss_mb']:.1f} MB")
         logger.info(f"Использовано памяти: {memory_after['rss_mb'] - memory_before['rss_mb']:.1f} MB")
+        
+        # Удаляем сообщение о обработке
+        try:
+            await processing_msg.delete()
+        except:
+            pass
 
-async def post_init(application):
-    """Регистрация команд в меню бота"""
-    commands = config.COMMANDS
-    await application.bot.set_my_commands(commands)
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        gc.collect()
 
 def main():
     """Основная функция запуска бота"""
-    # Очищаем все активные админ-сессии при запуске
-    admin_sessions.clear()
-    user_languages.clear()  # Очищаем языковые настройки
-    
-    if not config.TELEGRAM_BOT_TOKEN:
-        logger.error("Токен бота не найден! Проверьте файл .env")
-        return
-    
-    if not recognizer:
-        logger.error("Не удалось инициализировать распознаватель Vosk")
-        return
-    
-    print("🚀 Запуск бота...")
-    print(f"📊 Модель Vosk: {config.VOSK_MODEL_PATH}")
-    print(f"👑 Админ ID: {config.ADMIN_USER_ID}")
-    print(f"🌍 Поддерживаемые языки: {config.SUPPORTED_LANGUAGES}")
-    
     try:
+        logger.info("🚀 Запуск бота...")
+        
+        # Проверяем наличие необходимых директорий
+        os.makedirs('temp', exist_ok=True)
+        os.makedirs('logs', exist_ok=True)
+        
         # Создаем приложение
-        application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).post_init(post_init).build()
+        application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
         
         # Добавляем обработчики
         application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("stats", stats_command))
         application.add_handler(CommandHandler("settings", settings_command))
+        application.add_handler(CommandHandler("language", language_command))
         application.add_handler(CommandHandler("admin", admin_command))
-        application.add_handler(CommandHandler("language", language_command))  # НОВЫЙ ОБРАБОТЧИК
-        application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
+        
+        # Обработчики сообщений
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
+        application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
         
         # Обработчик ошибок
         application.add_error_handler(error_handler)
         
-        # Запускаем бота
-        print("✅ Бот запущен! Ожидаем сообщения...")
-        print("🛑 Для остановки нажмите Ctrl+C")
+        logger.info("✅ Бот запущен и готов к работе!")
+        logger.info(f"Доступные языки Vosk: {recognizer.get_available_languages() if recognizer else 'Нет'}")
         
-        application.run_polling()
+        # Запускаем бота
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
         
     except Exception as e:
-        logger.error(f"Ошибка запуска бота: {e}")
+        logger.error(f"❌ Критическая ошибка при запуске: {e}")
+        logger.error(traceback.format_exc())
 
 if __name__ == "__main__":
-    # Для Windows
-    if os.name == 'nt':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    
     main()

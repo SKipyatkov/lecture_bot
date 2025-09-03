@@ -11,8 +11,11 @@ class Config:
     # Максимальный размер файла (20 МБ по умолчанию)
     MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 20971520))
     
-    # Путь к модели Vosk
-    VOSK_MODEL_PATH = os.getenv('VOSK_MODEL_PATH', 'models/ru-model')
+    # Пути к моделям Vosk для разных языков (ОБНОВЛЕНО!)
+    VOSK_MODEL_PATHS = {
+        'ru': os.getenv('VOSK_MODEL_PATH_RU', 'models/ru-model'),
+        'en': os.getenv('VOSK_MODEL_PATH_EN', 'models/en-model')
+    }
     
     # Пароль администратора
     ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'admin123')
@@ -20,7 +23,7 @@ class Config:
     # ID администратора
     ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', 0)) if os.getenv('ADMIN_USER_ID') else 0
     
-    # Поддерживаемые языки (НОВОЕ!)
+    # Поддерживаемые языки
     SUPPORTED_LANGUAGES = ['ru', 'en']
     DEFAULT_LANGUAGE = 'ru'
     
@@ -43,7 +46,7 @@ class Config:
         "resize_keyboard": True
     }
     
-    # Клавиатура выбора языка (НОВОЕ!)
+    # Клавиатура выбора языка
     LANGUAGE_MENU = {
         "keyboard": [
             ["🇷🇺 Русский", "🇺🇸 English"],
@@ -58,7 +61,7 @@ class Config:
         ("stats", "Показать статистику"),
         ("help", "Показать справку"),
         ("settings", "Настройки бота"),
-        ("language", "Сменить язык"),  # НОВАЯ КОМАНДА
+        ("language", "Сменить язык"),
         ("admin", "Панель администратора")
     ]
 
