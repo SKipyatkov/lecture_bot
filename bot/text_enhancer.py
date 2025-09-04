@@ -1,94 +1,42 @@
 import re
 import logging
-from transformers import pipeline
 import torch
+from transformers import pipeline
 
 logger = logging.getLogger(__name__)
 
 class TextEnhancer:
     def __init__(self):
-        # Инициализируем модели для исправления опечаток и пунктуации
-        self.spell_checkers = {}
-        self.punctuation_restorers = {}
-        
-        # Оптимизация памяти: используем более легкие модели
+        self.punctuation_model = None
+        self.spell_checker = None
         self.load_models()
     
     def load_models(self):
-        """Загружает модели с оптимизацией памяти"""
+        """Загружает модели для улучшения текста"""
         try:
-            logger.info("Загрузка оптимизированных моделей...")
+            logger.info("Загрузка моделей для улучшения текста...")
             
-            # Для русского языка используем более легкие модели
-            self.spell_checkers['ru'] = self.create_spell_checker('ru')
-            self.punctuation_restorers['ru'] = self.create_punctuation_restorer('ru')
+            # Специализированная модель для русского языка с пунктуацией
+            self.punctuation_model = pipeline(
+                'text2text-generation',
+                model='UrukHan/t5-russian-spell',
+                device=0 if torch.cuda.is_available() else -1,
+                torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                max_length=512
+            )
             
-            # Для английского языка
-            self.spell_checkers['en'] = self.create_spell_checker('en')
-            self.punctuation_restorers['en'] = self.create_punctuation_restorer('en')
-            
-            logger.info("Модели успешно загружены с оптимизацией памяти!")
+            logger.info("Модель для русского текста успешно загружена!")
             
         except Exception as e:
             logger.error(f"Ошибка загрузки моделей: {e}")
-            # Резервные простые обработчики
-            self.spell_checkers = {'ru': None, 'en': None}
-            self.punctuation_restorers = {'ru': None, 'en': None}
+            self.punctuation_model = None
     
-    def create_spell_checker(self, language):
-        """Создает исправитель опечаток с оптимизацией памяти"""
-        try:
-            if language == 'ru':
-                # Используем более простую модель для русского
-                return pipeline(
-                    'text2text-generation',
-                    model='UrukHan/t5-russian-spell',
-                    device=0 if torch.cuda.is_available() else -1,
-                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                    max_length=128  # Уменьшаем максимальную длину
-                )
-            else:
-                # Используем более простую модель для английского
-                return pipeline(
-                    'text2text-generation',
-                    model='textattack/t5-base-grammar-correction',
-                    device=0 if torch.cuda.is_available() else -1,
-                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                    max_length=128
-                )
-        except Exception as e:
-            logger.error(f"Ошибка создания исправителя для {language}: {e}")
-            return None
-    
-    def create_punctuation_restorer(self, language):
-        """Создает восстановитель пунктуации с оптимизацией памяти"""
-        try:
-            # Используем text2text-generation для восстановления пунктуации
-            if language == 'ru':
-                return pipeline(
-                    'text2text-generation',
-                    model='sberbank-ai/ruRoberta-large',
-                    device=0 if torch.cuda.is_available() else -1,
-                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
-                )
-            else:
-                return pipeline(
-                    'text2text-generation',
-                    model='prithivida/grammar_error_correcter_v1',
-                    device=0 if torch.cuda.is_available() else -1,
-                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32
-                )
-        except Exception as e:
-            logger.error(f"Ошибка создания восстановителя пунктуации: {e}")
-            return None
-
     def detect_language(self, text):
         """Определяет язык текста"""
         try:
             if not text or len(text.strip()) < 5:
-                return 'ru'  # по умолчанию русский
+                return 'ru'
             
-            # Простая эвристика для определения языка
             ru_chars = len(re.findall(r'[а-яё]', text.lower()))
             en_chars = len(re.findall(r'[a-z]', text.lower()))
             
@@ -99,149 +47,161 @@ class TextEnhancer:
         except:
             return 'ru'
     
-    def correct_spelling(self, text, language='ru'):
-        """Исправляет опечатки с помощью трансформеров"""
-        if not text or language not in self.spell_checkers or not self.spell_checkers[language]:
-            return text
-            
+    def enhance_russian_text(self, text):
+        """Улучшает русский текст с помощью специализированной модели"""
+        if not text or not self.punctuation_model:
+            return self.add_basic_punctuation(text)
+        
         try:
-            # Ограничиваем длину текста для экономии памяти
-            if len(text) > 200:
-                text = text[:200] + "..."
+            # Промпты для русской модели
+            prompts = [
+                f"исправить: {text}",
+                f"Добавить пунктуацию: {text}",
+                f"Восстановить текст: {text}",
+                f"Исправить орфографию: {text}"
+            ]
             
-            if language == 'ru':
-                prompt = f"исправить: {text}"
-                result = self.spell_checkers['ru'](
-                    prompt,
-                    max_new_tokens=100,
-                    num_beams=3,
-                    early_stopping=True
-                )
-                return result[0]['generated_text'].replace("исправить: ", "")
-            else:
-                prompt = f"correct: {text}"
-                result = self.spell_checkers['en'](
-                    prompt,
-                    max_new_tokens=100,
-                    num_beams=3,
-                    early_stopping=True
-                )
-                return result[0]['generated_text'].replace("correct: ", "")
-                
+            for prompt in prompts:
+                try:
+                    result = self.punctuation_model(
+                        prompt,
+                        max_new_tokens=512,
+                        num_beams=3,
+                        temperature=0.3,
+                        do_sample=False,
+                        early_stopping=True,
+                        repetition_penalty=1.1
+                    )
+                    
+                    enhanced_text = result[0]['generated_text'].strip()
+                    
+                    # Убираем промпт из результата
+                    enhanced_text = enhanced_text.replace("исправить: ", "")
+                    enhanced_text = enhanced_text.replace("Добавить пунктуацию: ", "")
+                    enhanced_text = enhanced_text.replace("Восстановить текст: ", "")
+                    enhanced_text = enhanced_text.replace("Исправить орфографию: ", "")
+                    
+                    if enhanced_text and len(enhanced_text) > 10:
+                        logger.info(f"Модель вернула: {enhanced_text[:50]}...")
+                        return enhanced_text
+                        
+                except Exception as e:
+                    logger.warning(f"Ошибка с промптом {prompt}: {e}")
+                    continue
+            
+            return self.add_basic_punctuation(text)
+            
         except Exception as e:
-            logger.error(f"Ошибка исправления опечаток: {e}")
-            return text
+            logger.error(f"Ошибка улучшения русского текста: {e}")
+            return self.add_basic_punctuation(text)
     
-def restore_punctuation(self, text, language='ru'):
-    """Восстанавливает пунктуацию с помощью трансформеров"""
-    if not text or language not in self.punctuation_restorers or not self.punctuation_restorers[language]:
-        return self.add_basic_punctuation(text)
-        
-    try:
-        # Ограничиваем длину текста
-        if len(text) > 300:
-            text = text[:300]
-        
-        # Для английского используем специальный промпт
-        if language == 'en':
-            prompt = f"Add punctuation to: {text}"
-            result = self.punctuation_restorers[language](
-                prompt,
-                max_new_tokens=150,
-                num_beams=3,
-                early_stopping=True
-            )
-            generated = result[0]['generated_text'].replace("Add punctuation to: ", "")
-            
-            # Проверяем, не дублируется ли текст
-            if generated.count(text) > 1:
-                # Если текст дублируется, возвращаем оригинал с базовой пунктуацией
-                return self.add_basic_punctuation(text)
-            return generated
-        else:
-            # Для русского используем стандартный подход
-            result = self.punctuation_restorers[language](text)
-            return result[0]['generated_text']
-    except Exception as e:
-        logger.error(f"Ошибка восстановления пунктуации: {e}")
-        return self.add_basic_punctuation(text)
-    
-def add_basic_punctuation(self, text):
-    """Добавляет базовую пунктуацию (резервный метод)"""
-    if not text:
-        return text
-        
-    # Убираем лишние пробелы
-    text = re.sub(r'\s+', ' ', text.strip())
-    
-    # Добавляем точку в конец, если её нет
-    if text and text[-1] not in '.!?':
-        text += '.'
-        
-    # Простые правила для запятых (общие для обоих языков)
-    conjunctions = ['and', 'but', 'or', 'so', 'because', 'although', 'however', 'therefore']
-    
-    for conj in conjunctions:
-        text = re.sub(r'\s+' + conj + r'\s+', ', ' + conj + ' ', text)
-    
-    # Заглавная буква в начале предложения
-    if text and len(text) > 1:
-        text = text[0].upper() + text[1:]
-    
-    return text
-    
-    def improve_with_context(self, text, context_words=None):
-        """Улучшает текст на основе контекста"""
+    def enhance_english_text(self, text):
+        """Улучшает английский текст"""
         if not text:
             return text
+        
+        try:
+            # Для английского используем базовые правила
+            return self.add_basic_punctuation(text, 'en')
+        except Exception as e:
+            logger.error(f"Ошибка улучшения английского текста: {e}")
+            return text
+    
+    def add_basic_punctuation(self, text, language='ru'):
+        """Добавляет базовую пунктуацию"""
+        if not text:
+            return text
+        
+        text = re.sub(r'\s+', ' ', text.strip())
+        
+        # Добавляем точку в конец
+        if text and text[-1] not in '.!?':
+            text += '.'
+        
+        if language == 'ru':
+            # Правила для русского языка
+            conjunctions = ['но', 'а', 'однако', 'зато', 'поэтому', 'потому что', 'также']
+            for conj in conjunctions:
+                text = text.replace(f' {conj} ', f', {conj} ')
             
-        # Простые замены часто неправильно распознаваемых слов
+            # Вопросительные слова
+            question_words = ['кто', 'что', 'где', 'когда', 'почему', 'как', 'зачем']
+            for word in question_words:
+                if word in text.lower() and '?' not in text:
+                    text = text.replace('.', '?', 1)
+                    break
+        else:
+            # Правила для английского языка
+            conjunctions = ['but', 'however', 'although', 'though', 'therefore']
+            for conj in conjunctions:
+                text = text.replace(f' {conj} ', f', {conj} ')
+            
+            question_words = ['who', 'what', 'where', 'when', 'why', 'how']
+            for word in question_words:
+                if word in text.lower() and '?' not in text:
+                    text = text.replace('.', '?', 1)
+                    break
+        
+        # Заглавные буквы в начале предложений
+        if text and len(text) > 1:
+            text = text[0].upper() + text[1:]
+        
+        # Восстановление предложений
+        text = re.sub(r'([.!?])\s*([a-zа-я])', 
+                     lambda m: m.group(1) + ' ' + m.group(2).upper(), text)
+        
+        return text
+    
+    def correct_common_mistakes(self, text, language):
+        """Исправляет частые ошибки распознавания"""
+        if not text:
+            return text
+        
         common_mistakes = {
-            'щас': 'сейчас',
-            'кста': 'кстати', 
-            'вообщем': 'в общем',
-            'итд': 'и так далее',
-            'итп': 'и тому подобное',
-            'здрасте': 'здравствуйте',
-            'пака': 'пока',
-            'спсибо': 'спасибо',
-            'пожалуйсто': 'пожалуйста',
-            'седня': 'сегодня',
-            'ща': 'сейчас',
-            'плиз': 'пожалуйста',
-            'ок': 'окей',
-            'ладно': 'хорошо'
+            'ru': {
+                'щас': 'сейчас', 'кста': 'кстати', 'вообщем': 'в общем',
+                'итд': 'и так далее', 'здрасте': 'здравствуйте', 'пака': 'пока',
+                'спсибо': 'спасибо', 'пожалуйсто': 'пожалуйста', 'седня': 'сегодня',
+                'ща': 'сейчас', 'ок': 'окей', 'чё': 'что', 'ничо': 'ничего',
+                'скока': 'сколько', 'када': 'когда', 'чёто': 'что-то',
+                'здеся': 'здесь', 'тута': 'тут', 'канеш': 'конечно'
+            },
+            'en': {
+                'plz': 'please', 'thx': 'thanks', 'u': 'you', 'r': 'are',
+                'btw': 'by the way', 'imo': 'in my opinion'
+            }
         }
         
-        for wrong, correct in common_mistakes.items():
-            text = text.replace(wrong, correct)
-            
+        mistakes = common_mistakes.get(language, {})
+        for wrong, correct in mistakes.items():
+            text = re.sub(r'\b' + wrong + r'\b', correct, text, flags=re.IGNORECASE)
+        
         return text
     
     def enhance_text(self, text, context_words=None):
         """Основная функция улучшения текста"""
         if not text or text == "Не удалось распознать речь":
             return text
-            
+        
         logger.info(f"Улучшаем текст: {text[:50]}...")
         
         # Определяем язык
         language = self.detect_language(text)
         logger.info(f"Определен язык: {language}")
         
-        # Исправляем опечатки
-        corrected = self.correct_spelling(text, language)
-        logger.info(f"После исправления опечаток: {corrected[:50]}...")
+        # Исправляем частые ошибки
+        corrected = self.correct_common_mistakes(text, language)
+        logger.info(f"После исправления ошибок: {corrected[:50]}...")
         
-        # Улучшаем контекст
-        enhanced = self.improve_with_context(corrected, context_words)
-        logger.info(f"После контекстного улучшения: {enhanced[:50]}...")
+        # Улучшаем в зависимости от языка
+        if language == 'ru':
+            enhanced = self.enhance_russian_text(corrected)
+        else:
+            enhanced = self.enhance_english_text(corrected)
         
-        # Восстанавливаем пунктуацию
-        punctuated = self.restore_punctuation(enhanced, language)
-        logger.info(f"После восстановления пунктуации: {punctuated[:50]}...")
+        logger.info(f"После улучшения: {enhanced[:50]}...")
         
-        return punctuated
+        return enhanced
 
 # Создаем глобальный экземпляр для использования
 text_enhancer = TextEnhancer()

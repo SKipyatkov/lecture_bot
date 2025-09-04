@@ -11,7 +11,7 @@ class Config:
     # Максимальный размер файла (20 МБ по умолчанию)
     MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 20971520))
     
-    # Пути к моделям Vosk для разных языков (ОБНОВЛЕНО!)
+    # Пути к моделям Vosk для разных языков
     VOSK_MODEL_PATHS = {
         'ru': os.getenv('VOSK_MODEL_PATH_RU', 'models/ru-model'),
         'en': os.getenv('VOSK_MODEL_PATH_EN', 'models/en-model')
