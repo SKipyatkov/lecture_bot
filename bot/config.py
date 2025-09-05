@@ -29,7 +29,26 @@ class Config:
     
     # Поддерживаемые типы файлов
     SUPPORTED_FILE_TYPES = ['voice', 'audio', 'video', 'video_note']
-    MAX_VIDEO_DURATION = 300  # 5 минут максимальная длительность видео
+    MAX_VIDEO_DURATION = 600  # 10 минут максимальная длительность видео
+    
+    # Настройки улучшения качества аудио
+    AUDIO_ENHANCEMENT = {
+        'noise_reduction': True,
+        'normalize': True,
+        'sample_rate': 16000,
+        'channels': 1,
+        'bit_depth': 16,
+        'aggressive_nr': True
+    }
+    
+    # Настройки Vosk для улучшения распознавания
+    VOSK_SETTINGS = {
+        'max_alternatives': 5,
+        'words': True,
+        'partial_results': True,
+        'speech_timeout': 0.3,
+        'min_confidence': 0.6
+    }
     
     # Клавиатура главного меню
     MAIN_MENU = {

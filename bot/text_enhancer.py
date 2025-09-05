@@ -8,7 +8,6 @@ logger = logging.getLogger(__name__)
 class TextEnhancer:
     def __init__(self):
         self.punctuation_model = None
-        self.spell_checker = None
         self.load_models()
     
     def load_models(self):
@@ -16,7 +15,7 @@ class TextEnhancer:
         try:
             logger.info("Загрузка моделей для улучшения текста...")
             
-            # Специализированная модель для русского языка с пунктуацией
+            # Специализированная модель для русского языка
             self.punctuation_model = pipeline(
                 'text2text-generation',
                 model='UrukHan/t5-russian-spell',
@@ -25,7 +24,7 @@ class TextEnhancer:
                 max_length=512
             )
             
-            logger.info("Модель для русского текста успешно загружена!")
+            logger.info("Модель для улучшения текста успешно загружена!")
             
         except Exception as e:
             logger.error(f"Ошибка загрузки моделей: {e}")
@@ -34,31 +33,27 @@ class TextEnhancer:
     def detect_language(self, text):
         """Определяет язык текста"""
         try:
-            if not text or len(text.strip()) < 5:
+            if not text or len(text.strip()) < 3:
                 return 'ru'
             
             ru_chars = len(re.findall(r'[а-яё]', text.lower()))
             en_chars = len(re.findall(r'[a-z]', text.lower()))
             
-            if ru_chars > en_chars:
-                return 'ru'
-            else:
-                return 'en'
+            return 'ru' if ru_chars > en_chars else 'en'
         except:
             return 'ru'
     
     def enhance_russian_text(self, text):
-        """Улучшает русский текст с помощью специализированной модели"""
+        """Улучшает русский текст с помощью модели"""
         if not text or not self.punctuation_model:
             return self.add_basic_punctuation(text)
         
         try:
-            # Промпты для русской модели
+            # Промпты для лучшего результата
             prompts = [
-                f"исправить: {text}",
-                f"Добавить пунктуацию: {text}",
-                f"Восстановить текст: {text}",
-                f"Исправить орфографию: {text}"
+                f"Расставить пунктуацию: {text}",
+                f"Исправить текст: {text}",
+                f"Восстановить текст: {text}"
             ]
             
             for prompt in prompts:
@@ -73,18 +68,18 @@ class TextEnhancer:
                         repetition_penalty=1.1
                     )
                     
-                    enhanced_text = result[0]['generated_text'].strip()
-                    
-                    # Убираем промпт из результата
-                    enhanced_text = enhanced_text.replace("исправить: ", "")
-                    enhanced_text = enhanced_text.replace("Добавить пунктуацию: ", "")
-                    enhanced_text = enhanced_text.replace("Восстановить текст: ", "")
-                    enhanced_text = enhanced_text.replace("Исправить орфографию: ", "")
-                    
-                    if enhanced_text and len(enhanced_text) > 10:
-                        logger.info(f"Модель вернула: {enhanced_text[:50]}...")
-                        return enhanced_text
+                    if result and len(result) > 0:
+                        enhanced_text = result[0]['generated_text'].strip()
                         
+                        # Убираем промпт из результата
+                        enhanced_text = enhanced_text.replace("Расставить пунктуацию: ", "")
+                        enhanced_text = enhanced_text.replace("Исправить текст: ", "")
+                        enhanced_text = enhanced_text.replace("Восстановить текст: ", "")
+                        
+                        if enhanced_text and len(enhanced_text) > len(text) / 2:
+                            logger.info("Модель улучшила русский текст")
+                            return enhanced_text
+                            
                 except Exception as e:
                     logger.warning(f"Ошибка с промптом {prompt}: {e}")
                     continue
@@ -100,15 +95,36 @@ class TextEnhancer:
         if not text:
             return text
         
-        try:
-            # Для английского используем базовые правила
-            return self.add_basic_punctuation(text, 'en')
-        except Exception as e:
-            logger.error(f"Ошибка улучшения английского текста: {e}")
+        # Для английского используем правила + базовую пунктуацию
+        enhanced = self.fix_english_text(text)
+        enhanced = self.add_basic_punctuation(enhanced, 'en')
+        
+        return enhanced
+    
+    def fix_english_text(self, text):
+        """Исправляет английский текст"""
+        if not text:
             return text
+        
+        # Исправляем частые ошибки
+        corrections = {
+            r'\bi\b': 'I',
+            r'\bu\b': 'you',
+            r'\bur\b': 'your',
+            r'\bthru\b': 'through',
+            r'\btho\b': 'though',
+            r'\bcause\b': 'because',
+            r'\bkinda\b': 'kind of',
+            r'\bsorta\b': 'sort of'
+        }
+        
+        for pattern, replacement in corrections.items():
+            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+        
+        return text
     
     def add_basic_punctuation(self, text, language='ru'):
-        """Добавляет базовую пунктуацию"""
+        """Добавляет базовую пунктуацию с учетом языка"""
         if not text:
             return text
         
@@ -118,29 +134,31 @@ class TextEnhancer:
         if text and text[-1] not in '.!?':
             text += '.'
         
+        # Правила для русского языка
         if language == 'ru':
-            # Правила для русского языка
-            conjunctions = ['но', 'а', 'однако', 'зато', 'поэтому', 'потому что', 'также']
-            for conj in conjunctions:
-                text = text.replace(f' {conj} ', f', {conj} ')
-            
             # Вопросительные слова
             question_words = ['кто', 'что', 'где', 'когда', 'почему', 'как', 'зачем']
             for word in question_words:
-                if word in text.lower() and '?' not in text:
+                if re.search(rf'\b{word}\b', text.lower()) and '?' not in text:
                     text = text.replace('.', '?', 1)
                     break
-        else:
-            # Правила для английского языка
-            conjunctions = ['but', 'however', 'although', 'though', 'therefore']
+            
+            # Союзы
+            conjunctions = ['но', 'а', 'однако', 'зато', 'поэтому', 'потому что']
             for conj in conjunctions:
                 text = text.replace(f' {conj} ', f', {conj} ')
-            
+        
+        # Правила для английского языка
+        else:
             question_words = ['who', 'what', 'where', 'when', 'why', 'how']
             for word in question_words:
-                if word in text.lower() and '?' not in text:
+                if re.search(rf'\b{word}\b', text.lower()) and '?' not in text:
                     text = text.replace('.', '?', 1)
                     break
+            
+            conjunctions = ['but', 'however', 'although', 'therefore']
+            for conj in conjunctions:
+                text = text.replace(f' {conj} ', f', {conj} ')
         
         # Заглавные буквы в начале предложений
         if text and len(text) > 1:
@@ -168,7 +186,8 @@ class TextEnhancer:
             },
             'en': {
                 'plz': 'please', 'thx': 'thanks', 'u': 'you', 'r': 'are',
-                'btw': 'by the way', 'imo': 'in my opinion'
+                'btw': 'by the way', 'imo': 'in my opinion', 'gonna': 'going to',
+                'wanna': 'want to', 'gotta': 'got to'
             }
         }
         
@@ -191,7 +210,6 @@ class TextEnhancer:
         
         # Исправляем частые ошибки
         corrected = self.correct_common_mistakes(text, language)
-        logger.info(f"После исправления ошибок: {corrected[:50]}...")
         
         # Улучшаем в зависимости от языка
         if language == 'ru':
