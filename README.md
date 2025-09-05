@@ -4,7 +4,7 @@ Telegram bot that converts voice messages and audio files to text using offline 
 
 ## 🚀 Features
 
-- ✅ Converts voice messages to text
+- ✅ Converts voice and video messages to text
 - ✅ Works completely offline
 - ✅ Uses Russian Vosk model
 - ✅ Free and open source
