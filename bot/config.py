@@ -27,6 +27,10 @@ class Config:
     SUPPORTED_LANGUAGES = ['ru', 'en']
     DEFAULT_LANGUAGE = 'ru'
     
+    # Поддерживаемые типы файлов
+    SUPPORTED_FILE_TYPES = ['voice', 'audio', 'video', 'video_note']
+    MAX_VIDEO_DURATION = 300  # 5 минут максимальная длительность видео
+    
     # Клавиатура главного меню
     MAIN_MENU = {
         "keyboard": [

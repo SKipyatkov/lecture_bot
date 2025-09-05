@@ -58,6 +58,50 @@ class AudioProcessor:
             return False
 
     @staticmethod
+    def extract_audio_from_video(video_path, output_audio_path):
+        """
+        Извлекает аудиодорожку из видеофайла
+        """
+        try:
+            logger.info(f"Извлечение аудио из видео: {video_path}")
+            
+            command = [
+                'ffmpeg',
+                '-i', video_path,          # входной видеофайл
+                '-vn',                     # без видео
+                '-ac', '1',               # моно
+                '-ar', '16000',           # 16 kHz
+                '-acodec', 'pcm_s16le',   # 16-bit PCM
+                '-y',                     # перезаписать выходной файл
+                output_audio_path         # выходной аудиофайл
+            ]
+            
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=60  # увеличенный таймаут для видео
+            )
+            
+            if result.returncode == 0:
+                if os.path.exists(output_audio_path) and os.path.getsize(output_audio_path) > 0:
+                    logger.info(f"Аудио извлечено успешно, размер: {os.path.getsize(output_audio_path)} байт")
+                    return True
+                else:
+                    logger.error("Выходной аудиофайл не создан или пустой")
+                    return False
+            else:
+                logger.error(f"Ошибка извлечения аудио: {result.stderr}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            logger.error("Таймаут извлечения аудио из видео")
+            return False
+        except Exception as e:
+            logger.error(f"Неожиданная ошибка при извлечении аудио: {e}")
+            return False
+
+    @staticmethod
     async def process_telegram_audio(audio_file):
         """
         Асинхронно обрабатывает аудиофайл из Telegram
@@ -113,6 +157,72 @@ class AudioProcessor:
             except:
                 pass
             return None
+
+    @staticmethod
+    async def process_telegram_video(video_file):
+        """
+        Асинхронно обрабатывает видеофайл из Telegram
+        """
+        logger.info(f"Обработка видео файла: {video_file.file_id}")
+        
+        # Временные файлы
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_video:
+            temp_video_path = temp_video.name
+        
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_audio:
+            temp_audio_path = temp_audio.name
+        
+        try:
+            # Скачиваем видеофайл
+            with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_input:
+                input_path = temp_input.name
+                logger.info(f"Скачивание видео в: {input_path}")
+                
+                await video_file.download_to_drive(input_path)
+                
+                if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
+                    logger.error("Видеофайл не скачался или пустой")
+                    return None
+                
+                logger.info(f"Видеофайл скачан, размер: {os.path.getsize(input_path)} байt")
+            
+            # Извлекаем аудиодорожку
+            success = AudioProcessor.extract_audio_from_video(input_path, temp_audio_path)
+            
+            # Удаляем временный видеофайл
+            try:
+                os.unlink(input_path)
+            except:
+                pass
+            
+            if success:
+                logger.info(f"Аудио из видео успешно извлечено: {temp_audio_path}")
+                return temp_audio_path
+            else:
+                logger.error("Ошибка извлечения аудио из видео")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Ошибка обработки видео: {e}")
+            # Очищаем временные файлы
+            try:
+                if input_path and os.path.exists(input_path):
+                    os.unlink(input_path)
+            except:
+                pass
+            try:
+                os.unlink(temp_audio_path)
+            except:
+                pass
+            return None
+
+    @staticmethod
+    async def process_telegram_video_note(video_note_file):
+        """
+        Обрабатывает кружочек (video note) из Telegram
+        """
+        logger.info(f"Обработка кружочка: {video_note_file.file_id}")
+        return await AudioProcessor.process_telegram_video(video_note_file)
 
     @staticmethod
     def cleanup_temp_file(file_path):

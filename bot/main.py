@@ -250,7 +250,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚡ Работаю полностью оффлайн и бесплатно!\n"
         "🌍 Поддерживаю русский и английский языки\n"
         "✨ Автоматически исправляю опечатки и добавляю пунктуацию!\n\n"
-        "📎 Максимальный размер файла: 20 МБ"
+        "📎 Максимальный размер файла: 20 МБ\n"
+        "🎥 Также поддерживаю видеофайлы и кружочки!"
     )
     
     await update.message.reply_text(
@@ -264,8 +265,10 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "❓ Как пользоваться ботом:\n\n"
         "1. 🎤 Отправь голосовое сообщение\n"
         "2. 📎 Или отправь аудиофайл (MP3, OGG, WAV)\n"
-        "3. ⏳ Подожди 10-60 секунд\n"
-        "4. 📝 Получи улучшенный текст с пунктуацией!\n\n"
+        "3. 🎥 Или отправь видеофайл (MP4)\n"
+        "4. ⭕ Или отправь кружочек (video note)\n"
+        "5. ⏳ Подожди 10-60 секунд\n"
+        "6. 📝 Получи улучшенный текст с пунктуацией!\n\n"
         "✨ Новые возможности:\n"
         "• 🤖 Автоисправление опечаток\n"
         "• 📝 Автоматическая пунктуация\n"
@@ -337,7 +340,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     if text == "🎤 Распознать голос":
         await update.message.reply_text(
-            "Отправьте мне голосовое сообщение или аудиофайл для распознавания! 🎤",
+            "Отправьте мне голосовое сообщение, аудиофайл, видео или кружочек для распознавания! 🎤",
             reply_markup=config.MAIN_MENU
         )
     elif text == "📊 Статистика":
@@ -372,6 +375,137 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             "Не понимаю эту команду. Используйте меню ниже:",
             reply_markup=config.MAIN_MENU
         )
+
+async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик видеофайлов"""
+    await process_media(update, context, "video")
+
+async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик кружочков (video notes)"""
+    await process_media(update, context, "video_note")
+
+async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE, media_type):
+    """
+    Общая функция обработки медиафайлов
+    """
+    user = update.effective_user
+    
+    # Проверяем режим администратора
+    if is_in_admin_mode(user.id):
+        await update.message.reply_text(
+            "❌ В режиме администратора распознавание медиа недоступно.",
+            reply_markup=config.ADMIN_MENU
+        )
+        return
+
+    # Проверяем распознаватель
+    if not recognizer:
+        await update.message.reply_text("❌ Бот временно не работает.")
+        return
+
+    # Получаем файл в зависимости от типа
+    if media_type == "video":
+        media_file = update.message.video
+        file_type = "видеофайл"
+    elif media_type == "video_note":
+        media_file = update.message.video_note
+        file_type = "кружочек"
+    else:
+        return
+
+    # Проверяем размер файла
+    if media_file.file_size > config.MAX_FILE_SIZE:
+        await update.message.reply_text(
+            f"❌ Файл слишком большой! Максимальный размер: {config.MAX_FILE_SIZE // (1024*1024)} МБ"
+        )
+        return
+
+    # Проверяем длительность для видео
+    if media_type == "video" and media_file.duration > config.MAX_VIDEO_DURATION:
+        await update.message.reply_text(
+            f"❌ Видео слишком длинное! Максимальная длительность: {config.MAX_VIDEO_DURATION // 60} минут"
+        )
+        return
+
+    # Получаем язык пользователя
+    user_language = get_user_language(user.id)
+
+    # Сообщение о начале обработки
+    processing_msg = await update.message.reply_text(
+        f"⏳ Обрабатываю {file_type}...\n"
+        f"📏 Размер: {media_file.file_size // 1024} КБ\n"
+        f"⏱️ Длительность: {media_file.duration} сек\n"
+        f"🌍 Язык: {user_language.upper()}\n"
+        "Извлекаю аудио и распознаю речь..."
+    )
+
+    temp_audio_path = None
+    try:
+        # Скачиваем и обрабатываем медиафайл
+        telegram_file = await media_file.get_file()
+        
+        if media_type == "video":
+            temp_audio_path = await AudioProcessor.process_telegram_video(telegram_file)
+        elif media_type == "video_note":
+            temp_audio_path = await AudioProcessor.process_telegram_video_note(telegram_file)
+
+        if not temp_audio_path:
+            await processing_msg.edit_text("❌ Ошибка при обработке медиафайла")
+            return
+
+        # Распознаем речь
+        recognized_text = recognizer.recognize_audio(temp_audio_path, user_language)
+
+        # Улучшаем текст
+        if recognized_text and "Ошибка" not in recognized_text:
+            try:
+                enhanced_text = text_enhancer.enhance_text(recognized_text, [])
+                if enhanced_text:
+                    recognized_text = enhanced_text
+            except Exception as e:
+                logger.error(f"Ошибка улучшения текста: {e}")
+
+        # Сохраняем в базу
+        db.add_audio_request(user.id, media_file.file_id, media_file.file_size, media_file.duration, recognized_text)
+
+        # Отправляем результат
+        if recognized_text and "Ошибка" not in recognized_text:
+            response_text = (
+                f"✅ Распознано из {file_type}!\n"
+                f"⏱️ Длительность: {media_file.duration} сек\n"
+                f"📝 Текст:\n\n{recognized_text}"
+            )
+            
+            if len(response_text) > 4000:
+                parts = [response_text[i:i+4000] for i in range(0, len(response_text), 4000)]
+                for part in parts:
+                    await update.message.reply_text(part)
+            else:
+                await update.message.reply_text(response_text)
+        else:
+            await update.message.reply_text("❌ Не удалось распознать речь из видео.")
+
+    except Exception as e:
+        error_msg = log_error(f"{media_type} processing error", e, update)
+        await update.message.reply_text("❌ Произошла ошибка при обработке.")
+
+    finally:
+        # Очистка временных файлов
+        if temp_audio_path and os.path.exists(temp_audio_path):
+            try:
+                os.remove(temp_audio_path)
+            except:
+                pass
+        
+        # Удаляем сообщение о обработке
+        try:
+            await processing_msg.delete()
+        except:
+            pass
+
+        # Очистка памяти
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        gc.collect()
 
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик аудиосообщений и аудиофайлов"""
@@ -558,6 +692,8 @@ def main():
         # Обработчики сообщений
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
         application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
+        application.add_handler(MessageHandler(filters.VIDEO, handle_video))
+        application.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
         
         # Обработчик ошибок
         application.add_error_handler(error_handler)
