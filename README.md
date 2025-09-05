@@ -18,6 +18,8 @@ Telegram bot that converts voice messages and audio files to text using offline 
 - SQLite database
 - Telegram Bot API
 
+## 🐵 Developed by kipyatoook
+
 ## 📦 Installation
 
 1. Clone repository:
