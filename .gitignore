@@ -28,4 +28,8 @@ __pycache__/
 *.tmp
 *.temp
 .DS_Store
-Thumbs.db
+Thumbs.db"bot_database.db" 
+"*.log" 
+"backups/" 
+"temp/" 
+"cache/" 
