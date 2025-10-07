@@ -127,7 +127,7 @@ lecture_bot/
     └── main.py               
 ├── config.yaml / .env      # Конфигурация
 ├── models/                 # Модель Vosk
-├── data/                   # Данные или база (если используется)
+├── database.db                   # Данные или база (если используется)
 ├── requirements.txt
 └── README.md
 ```
@@ -177,7 +177,7 @@ sudo systemctl start lecture_bot
 **SKipyatkov**  
 🔗 [GitHub](https://github.com/SKipyatkov)
 🔗 [Telegram](@kipyatoook)
-🔗 [Mail](skipyatkov1608@gmail.com)
+🔗 [EMail](skipyatkov1608@gmail.com)
 
 ---
 
