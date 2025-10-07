@@ -176,8 +176,8 @@ sudo systemctl start lecture_bot
 
 **SKipyatkov**  
 🔗 [GitHub](https://github.com/SKipyatkov)
-🔗 [Telegram](@kipyatoook)
-🔗 [EMail](skipyatkov1608@gmail.com)
+🔗 [Telegram](t.me/kipyatoook)
+🔗 [Email](skipyatkov1608@gmail.com) skipyatkov1608@gmail.com
 
 ---
 
