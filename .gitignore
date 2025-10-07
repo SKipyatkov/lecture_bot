@@ -33,3 +33,37 @@ Thumbs.db"bot_database.db"
 "backups/" 
 "temp/" 
 "cache/" 
+
+# Бэкапы
+backups/
+
+# Логи
+logs/
+
+# Файлы окружения
+.env
+.env.local
+.env.production
+
+# Кэш Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.db
+*.sqlite3
+
+# Temporary files
+*.tmp
+*.temp
