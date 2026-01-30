@@ -9,7 +9,7 @@ Telegram-бот, который автоматически **преобразу�
 
 - 🎙 Распознаёт голосовые сообщения Telegram  
 - 🎧 Поддерживает аудиофайлы (MP3, WAV, OGG и др.)  
-- 🧠 Работает полностью офлайн (Vosk)  
+- 🧠 Работает полностью офлайн, интернет нужен только для работы Telegram
 - 🗣 Поддержка русского и английского языка  
 - ⚙️ Простая установка и настройка  
 - 💾 Минимальные зависимости  
@@ -127,7 +127,7 @@ lecture_bot/
     └── main.py               
 ├── config.yaml / .env      # Конфигурация
 ├── models/                 # Модель Vosk
-├── database.db                   # Данные или база (если используется)
+├── database.db             # Данные или база (если используется)
 ├── requirements.txt
 └── README.md
 ```
@@ -176,8 +176,7 @@ sudo systemctl start lecture_bot
 
 **SKipyatkov**  
 🔗 [GitHub](https://github.com/SKipyatkov)
-🔗 [Telegram](t.me/kipyatoook)
-🔗 [Email](skipyatkov1608@gmail.com) skipyatkov1608@gmail.com
+🔗 [Telegram](https://t.me/kipyatoook)
 
 ---
 

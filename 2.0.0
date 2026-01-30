@@ -1,0 +1,38 @@
+Collecting torch
+  Obtaining dependency information for torch from https://files.pythonhosted.org/packages/6e/01/624c4324ca01f66ae4c7cd1b74eb16fb52596dce66dbe51eff95ef9e7a4c/torch-2.10.0-cp312-cp312-win_amd64.whl.metadata
+  Downloading torch-2.10.0-cp312-cp312-win_amd64.whl.metadata (31 kB)
+Collecting filelock (from torch)
+  Obtaining dependency information for filelock from https://files.pythonhosted.org/packages/b5/36/7fb70f04bf00bc646cd5bb45aa9eddb15e19437a28b8fb2b4a5249fac770/filelock-3.20.3-py3-none-any.whl.metadata
+  Downloading filelock-3.20.3-py3-none-any.whl.metadata (2.1 kB)
+Requirement already satisfied: typing-extensions>=4.10.0 in c:\users\sasha\appdata\local\programs\python\python312\lib\site-packages (from torch) (4.15.0)
+Collecting sympy>=1.13.3 (from torch)
+  Obtaining dependency information for sympy>=1.13.3 from https://files.pythonhosted.org/packages/a2/09/77d55d46fd61b4a135c444fc97158ef34a095e5681d0a6c10b75bf356191/sympy-1.14.0-py3-none-any.whl.metadata
+  Downloading sympy-1.14.0-py3-none-any.whl.metadata (12 kB)
+Collecting networkx>=2.5.1 (from torch)
+  Obtaining dependency information for networkx>=2.5.1 from https://files.pythonhosted.org/packages/9e/c9/b2622292ea83fbb4ec318f5b9ab867d0a28ab43c5717bb85b0a5f6b3b0a4/networkx-3.6.1-py3-none-any.whl.metadata
+  Downloading networkx-3.6.1-py3-none-any.whl.metadata (6.8 kB)
+Requirement already satisfied: jinja2 in c:\users\sasha\appdata\local\programs\python\python312\lib\site-packages (from torch) (3.1.6)
+Collecting fsspec>=0.8.5 (from torch)
+  Obtaining dependency information for fsspec>=0.8.5 from https://files.pythonhosted.org/packages/01/c9/97cc5aae1648dcb851958a3ddf73ccd7dbe5650d95203ecb4d7720b4cdbf/fsspec-2026.1.0-py3-none-any.whl.metadata
+  Downloading fsspec-2026.1.0-py3-none-any.whl.metadata (10 kB)
+Collecting setuptools (from torch)
+  Obtaining dependency information for setuptools from https://files.pythonhosted.org/packages/94/b8/f1f62a5e3c0ad2ff1d189590bfa4c46b4f3b6e49cef6f26c6ee4e575394d/setuptools-80.10.2-py3-none-any.whl.metadata
+  Using cached setuptools-80.10.2-py3-none-any.whl.metadata (6.6 kB)
+Collecting mpmath<1.4,>=1.1.0 (from sympy>=1.13.3->torch)
+  Obtaining dependency information for mpmath<1.4,>=1.1.0 from https://files.pythonhosted.org/packages/43/e3/7d92a15f894aa0c9c4b49b8ee9ac9850d6e63b03c9c32c0367a13ae62209/mpmath-1.3.0-py3-none-any.whl.metadata
+  Downloading mpmath-1.3.0-py3-none-any.whl.metadata (8.6 kB)
+Requirement already satisfied: MarkupSafe>=2.0 in c:\users\sasha\appdata\local\programs\python\python312\lib\site-packages (from jinja2->torch) (3.0.3)
+Downloading torch-2.10.0-cp312-cp312-win_amd64.whl (113.8 MB)
+   ---------------------------------------- 113.8/113.8 MB 7.2 MB/s eta 0:00:00
+Downloading fsspec-2026.1.0-py3-none-any.whl (201 kB)
+   --------------------------------------- 201.8/201.8 kB 12.8 MB/s eta 0:00:00
+Downloading networkx-3.6.1-py3-none-any.whl (2.1 MB)
+   ---------------------------------------- 2.1/2.1 MB 7.3 MB/s eta 0:00:00
+Downloading sympy-1.14.0-py3-none-any.whl (6.3 MB)
+   ---------------------------------------- 6.3/6.3 MB 8.1 MB/s eta 0:00:00
+Downloading filelock-3.20.3-py3-none-any.whl (16 kB)
+Using cached setuptools-80.10.2-py3-none-any.whl (1.1 MB)
+Downloading mpmath-1.3.0-py3-none-any.whl (536 kB)
+   ---------------------------------------- 536.2/536.2 kB 2.6 MB/s eta 0:00:00
+Installing collected packages: mpmath, sympy, setuptools, networkx, fsspec, filelock, torch
+Successfully installed filelock-3.20.3 fsspec-2026.1.0 mpmath-1.3.0 networkx-3.6.1 setuptools-80.10.2 sympy-1.14.0 torch-2.10.0

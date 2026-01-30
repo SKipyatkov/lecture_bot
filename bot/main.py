@@ -1,4 +1,6 @@
 import os
+import sys
+from pathlib import Path
 import logging
 import asyncio
 import traceback
@@ -22,7 +24,11 @@ from services.voice_synthesizer import voice_synthesizer
 from services.backup_service import backup_service
 from services.ab_testing import ab_testing
 from utils.system_check import system_checker
+from core.database import db
+from processors.vosk_recognizer import VoskRecognizer
 
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root))
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -45,11 +51,11 @@ def log_error(error_type, error, update=None):
     """Детальное логирование ошибок"""
     error_msg = f"❌ {error_type}: {error}"
     logger.error(error_msg)
-    
+
     if update and hasattr(update, 'effective_user'):
         user_info = f"User: {update.effective_user.id} {update.effective_user.username}"
         logger.error(f"   {user_info}")
-    
+
     logger.error(f"   Traceback: {traceback.format_exc()}")
     return error_msg
 
@@ -75,7 +81,65 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Глобальный обработчик ошибок"""
     try:
         log_error("Global error", context.error, update)
-        
+
+        # Проверка и логирование путей к моделям Vosk
+        import os
+        logger.info("🔍 Проверка путей к моделям Vosk из конфига...")
+
+        # Показываем пути из конфига
+        for lang, path in config.VOSK_MODEL_PATHS.items():
+            exists = os.path.exists(path)
+            logger.info(f"{'✅' if exists else '❌'} Модель {lang}: {path} {'(найдена)' if exists else '(не найдена!)'}")
+
+        # Проверяем конкретно ваши модели
+        expected_ru = r"C:\projects\lecture_bot\models\vosk_model_ru_0.42"
+        expected_en = r"C:\projects\lecture_bot\models\vosk-model-en-us-0.42-gigaspeech"
+
+        logger.info(f"📁 Ожидаемый путь русской модели: {expected_ru}")
+        logger.info(f"📁 Ожидаемый путь английской модели: {expected_en}")
+
+        if os.path.exists(expected_ru):
+            logger.info(f"✅ Русская модель найдена по ожидаемому пути")
+        else:
+            logger.error(f"❌ Русская модель НЕ найдена по ожидаемому пути!")
+
+        if os.path.exists(expected_en):
+            logger.info(f"✅ Английская модель найдена по ожидаемому пути")
+        else:
+            logger.error(f"❌ Английская модель НЕ найдена по ожидаемому пути!")
+
+        for lang, path in config.VOSK_MODEL_PATHS.items():
+            exists = os.path.exists(path)
+            status = "✅ НАЙДЕНА" if exists else "❌ НЕ НАЙДЕНА"
+            logger.info(f"  {status} Модель {lang}: {path}")
+
+            if exists:
+                # Показываем что внутри папки
+                try:
+                    items = os.listdir(path)
+                    logger.info(f"     Содержимое: {items[:5]}{'...' if len(items) > 5 else ''}")
+                except:
+                    logger.info(f"     Не удалось прочитать содержимое")
+
+        # Прямая проверка ваших путей
+        expected_paths = {
+            'ru': r"C:\projects\lecture_bot\models\vosk_model_ru_0.42",
+            'en': r"C:\projects\lecture_bot\models\vosk-model-en-us-0.42-gigaspeech"
+        }
+
+        logger.info("🔍 ПРОВЕРКА ПРЯМЫХ ПУТЕЙ:")
+        for lang, path in expected_paths.items():
+            if os.path.exists(path):
+                logger.info(f"✅ Прямой путь {lang}: {path}")
+            else:
+                logger.error(f"❌ Прямой путь не найден: {path}")
+
+                # Попробуем найти модели в родительской папке
+                parent_dir = r"C:\projects\lecture_bot\models"
+                if os.path.exists(parent_dir):
+                    items = os.listdir(parent_dir)
+                    logger.info(f"   📁 Что есть в {parent_dir}: {items}")
+
         if update and update.effective_message:
             error_text = (
                 "❌ Произошла непредвиденная ошибка.\n"
@@ -83,7 +147,7 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "🔄 Попробуйте отправить сообщение еще раз."
             )
             await update.effective_message.reply_text(error_text)
-            
+
     except Exception as e:
         logger.error(f"Error in error handler: {e}")
 
@@ -103,17 +167,17 @@ async def start_services():
         # Запуск очереди обработки
         await processing_queue.start()
         logger.info("✅ Очередь обработки запущена")
-        
+
         # Запуск автоматического резервного копирования
         if config.BACKUP_ENABLED:
             backup_service.start_auto_backup(config.BACKUP_INTERVAL_HOURS)
             logger.info("✅ Сервис бэкапов запущен")
-        
+
         # Очистка старого кэша
         deleted_count = cache_manager.clear_old_cache()
         if deleted_count > 0:
             logger.info(f"✅ Очищено устаревших кэш-файлов: {deleted_count}")
-        
+
     except Exception as e:
         logger.error(f"❌ Ошибка запуска сервисов: {e}")
 
@@ -121,30 +185,30 @@ async def start_services():
 def check_system_requirements():
     """Проверяет системные требования"""
     logger.info("🔍 Проверка системных требований...")
-    
+
     deps_status = system_checker.check_dependencies()
     system_info = system_checker.get_system_info()
     disk_space = system_checker.check_disk_space()
-    
+
     logger.info(f"💻 Система: {system_info['system']} {system_info['release']}")
     logger.info(f"🐍 Python: {system_info['python_version']}")
-    
+
     if disk_space and 'free_gb' in disk_space:
         logger.info(f"💾 Свободно места: {disk_space['free_gb']} GB ({disk_space['free_percent']}%)")
-    
+
     # Проверяем обязательные зависимости
     missing_required = []
     for dep_name, status in deps_status.items():
         if status['required'] and not status['available']:
             missing_required.append(dep_name)
-    
+
     if missing_required:
         logger.warning("⚠️  Отсутствуют обязательные зависимости:")
         for dep in missing_required:
             logger.warning(f"   - {dep}")
     else:
         logger.info("✅ Все обязательные зависимости доступны")
-    
+
     return len(missing_required) == 0
 
 # КОМАНДЫ БОТА
@@ -152,7 +216,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /start"""
     user = update.effective_user
     db.add_user(user.id, user.username, user.first_name, user.last_name)
-    
+
     welcome_text = (
         "🎤 Привет! Я бот для преобразования голосовых сообщений в текст.\n\n"
         "📝 Просто отправь мне голосовое сообщение или аудиофайл, "
@@ -163,7 +227,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📎 Максимальный размер файла: 20 МБ\n"
         "🎥 Также поддерживаю видеофайлы и кружочки!"
     )
-    
+
     await update.message.reply_text(
         welcome_text,
         reply_markup=config.MAIN_MENU
@@ -188,7 +252,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⚙️ Настройки: /settings\n"
         "🌍 Язык: /language"
     )
-    
+
     await update.message.reply_text(
         help_text,
         reply_markup=config.MAIN_MENU
@@ -198,12 +262,12 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /stats"""
     user = update.effective_user
     stats = db.get_user_stats(user.id)
-    
+
     if stats and stats[0] > 0:
         total_requests, total_size, total_duration = stats
         total_size_mb = total_size / (1024 * 1024) if total_size else 0
         total_minutes = total_duration / 60 if total_duration else 0
-        
+
         stats_text = (
             f"📊 Ваша статистика:\n\n"
             f"• Всего запросов: {total_requests}\n"
@@ -213,7 +277,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     else:
         stats_text = "📊 Вы еще не отправляли аудио для распознавания."
-    
+
     await update.message.reply_text(
         stats_text,
         reply_markup=config.MAIN_MENU
@@ -230,7 +294,7 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Выбор языка распознавания (/language)\n\n"
         "Больше настроек появится в ближайшем обновлении! 🚀"
     )
-    
+
     await update.message.reply_text(
         settings_text,
         parse_mode='HTML',
@@ -240,21 +304,21 @@ async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды для смены языка"""
     user = update.effective_user
-    
+
     available_languages = recognizer.get_available_languages() if recognizer else ['ru']
-    
+
     keyboard = []
     if 'ru' in available_languages:
         keyboard.append(["🇷🇺 Русский"])
     if 'en' in available_languages:
         keyboard.append(["🇺🇸 English"])
     keyboard.append(["🔙 Назад"])
-    
+
     language_menu = {
         "keyboard": keyboard,
         "resize_keyboard": True
     }
-    
+
     await update.message.reply_text(
         "🌍 Выберите язык распознавания:\n\n"
         "• 🇷🇺 Русский - для лекций на русском\n"
@@ -266,26 +330,26 @@ async def language_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик команды /admin"""
     user = update.effective_user
-    
+
     if user.id != config.ADMIN_USER_ID and config.ADMIN_USER_ID != 0:
         await update.message.reply_text("❌ У вас нет прав администратора!")
         return
-    
+
     if len(context.args) == 0:
         await update.message.reply_text(
             "🔐 Введите пароль администратора:\n"
             "Пример: /admin ваш_пароль"
         )
         return
-    
+
     password = context.args[0]
     if password != config.ADMIN_PASSWORD:
         await update.message.reply_text("❌ Неверный пароль администратора!")
         return
-    
+
     admin_sessions[user.id] = True
     db.add_admin_session(user.id)
-    
+
     await update.message.reply_text(
         "👑 Добро пожаловать в панель администратора!",
         reply_markup=config.ADMIN_MENU
@@ -305,7 +369,7 @@ async def batch_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "⏱️ *Обработка:* Параллельная, до 10 файлов одновременно\n"
         "💾 *Максимальный размер:* 50 МБ на архив"
     )
-    
+
     await update.message.reply_text(
         help_text,
         parse_mode='Markdown',
@@ -326,25 +390,25 @@ async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='Markdown'
         )
         return
-    
+
     text = ' '.join(context.args)
-    
+
     if len(text) > 500:
         await update.message.reply_text("❌ Текст слишком длинный (максимум 500 символов)")
         return
-    
+
     processing_msg = await update.message.reply_text("🔊 Озвучиваю текст...")
-    
+
     try:
         user_group = ab_testing.assign_group(update.effective_user.id, "voice_synthesis_method")
         audio_path = voice_synthesizer.text_to_speech(text)
-        
+
         if audio_path:
             await update.message.reply_voice(
                 voice=open(audio_path, 'rb'),
                 caption=f"📝 Озвученный текст: {text[:100]}..."
             )
-            
+
             ab_testing.track_result(
                 "voice_synthesis_method",
                 update.effective_user.id,
@@ -352,22 +416,22 @@ async def voice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 success=True,
                 metrics={'text_length': len(text), 'audio_size': os.path.getsize(audio_path)}
             )
-            
+
             os.unlink(audio_path)
         else:
             await update.message.reply_text("❌ Не удалось озвучить текст")
-            
+
             ab_testing.track_result(
-                "voice_synthesis_method", 
+                "voice_synthesis_method",
                 update.effective_user.id,
                 user_group,
                 success=False
             )
-    
+
     except Exception as e:
         log_error("Voice synthesis error", e, update)
         await update.message.reply_text("❌ Ошибка при озвучивании текста")
-    
+
     finally:
         try:
             await processing_msg.delete()
@@ -383,10 +447,11 @@ async def handle_video_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик кружочков (video notes)"""
     await process_media(update, context, "video_note")
 
+
 async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE, media_type):
     """Общая функция обработки медиафайлов"""
     user = update.effective_user
-    
+
     if is_in_admin_mode(user.id):
         await update.message.reply_text(
             "❌ В режиме администратора распознавание медиа недоступно.",
@@ -409,7 +474,7 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE, medi
 
     if media_file.file_size > config.MAX_FILE_SIZE:
         await update.message.reply_text(
-            f"❌ Файл слишком большой! Максимальный размер: {config.MAX_FILE_SIZE // (1024*1024)} МБ"
+            f"❌ Файл слишком большой! Максимальный размер: {config.MAX_FILE_SIZE // (1024 * 1024)} МБ"
         )
         return
 
@@ -431,12 +496,14 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE, medi
 
     temp_audio_path = None
     try:
-        telegram_file = await media_file.get_file()
-        
+        telegram_file = await media_file.get_file()  # ← ЭТУ СТРОКУ ДОБАВЬТЕ
+
+        audio_processor = AudioProcessor()  # ← СОЗДАЕМ ЭКЗЕМПЛЯР
+
         if media_type == "video":
-            temp_audio_path = await AudioProcessor.process_telegram_video(telegram_file)
+            temp_audio_path = await audio_processor.process_telegram_video(telegram_file)
         elif media_type == "video_note":
-            temp_audio_path = await AudioProcessor.process_telegram_video_note(telegram_file)
+            temp_audio_path = await audio_processor.process_telegram_video_note(telegram_file)
 
         if not temp_audio_path:
             await processing_msg.edit_text("❌ Ошибка при обработке медиафайла")
@@ -460,9 +527,9 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE, medi
                 f"⏱️ Длительность: {media_file.duration} сек\n"
                 f"📝 Текст:\n\n{recognized_text}"
             )
-            
+
             if len(response_text) > 4000:
-                parts = [response_text[i:i+4000] for i in range(0, len(response_text), 4000)]
+                parts = [response_text[i:i + 4000] for i in range(0, len(response_text), 4000)]
                 for part in parts:
                     await update.message.reply_text(part)
             else:
@@ -480,7 +547,7 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE, medi
                 os.remove(temp_audio_path)
             except:
                 pass
-        
+
         try:
             await processing_msg.delete()
         except:
@@ -493,21 +560,21 @@ async def process_media(update: Update, context: ContextTypes.DEFAULT_TYPE, medi
 async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик сообщений в режиме администратора"""
     user = update.effective_user
-    
+
     if not is_admin(user.id):
         await update.message.reply_text("❌ Доступ запрещен!")
         return
-    
+
     text = update.message.text
-    
+
     if text == "📊 Общая статистика":
         stats = db.get_global_stats()
         total_users, total_requests, total_size, total_duration = stats
-        
+
         queue_stats = processing_queue.get_queue_stats()
         cache_stats = cache_manager.get_cache_stats()
         avg_rating, total_ratings = db.get_average_rating()
-        
+
         stats_text = (
             f"📊 *Глобальная статистика:*\n\n"
             f"• 👥 Пользователей: {total_users}\n"
@@ -520,25 +587,25 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
             f"• 💰 Файлов в кэше: {cache_stats['total_files']}\n"
         )
         await update.message.reply_text(stats_text, parse_mode='Markdown')
-        
+
     elif text == "👥 Пользователи":
         users = db.get_all_users()
         if not users:
             await update.message.reply_text("📝 Пользователей пока нет.")
             return
-        
+
         users_text = "👥 *Список пользователей:*\n\n"
         for i, user in enumerate(users[:10], 1):
             user_id, username, first_name, last_name, requests, last_active = user
             users_text += f"{i}. {first_name} {last_name} (@{username})\n"
             users_text += f"   ID: {user_id}, Запросов: {requests}\n"
             users_text += f"   Активность: {last_active}\n\n"
-        
+
         if len(users) > 10:
             users_text += f"... и еще {len(users) - 10} пользователей"
-        
+
         await update.message.reply_text(users_text, parse_mode='Markdown')
-        
+
     elif text == "📋 Логи":
         try:
             log_file = f'bot_log_{datetime.now().strftime("%Y%m%d")}.log'
@@ -550,7 +617,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 await update.message.reply_text("📋 Файл логов не найден.")
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка чтения логов: {e}")
-            
+
     elif text == "💾 Создать бэкап":
         await update.message.reply_text("💾 Создаю резервную копию...")
         try:
@@ -565,7 +632,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
                 await update.message.reply_text("❌ Ошибка создания бэкапа")
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка: {e}")
-            
+
     elif text == "🔄 Перезагрузка":
         await update.message.reply_text("🔄 Перезагрузка сервисов...")
         try:
@@ -573,10 +640,10 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
             await update.message.reply_text("✅ Сервисы перезапущены!")
         except Exception as e:
             await update.message.reply_text(f"❌ Ошибка перезагрузки: {e}")
-            
+
     elif text == "⏹️ Остановка":
         await update.message.reply_text("⏹️ Остановка бота...")
-        
+
     elif text == "🔙 Назад":
         if user.id in admin_sessions:
             del admin_sessions[user.id]
@@ -585,7 +652,7 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
             "🔙 Возврат в обычный режим",
             reply_markup=config.MAIN_MENU
         )
-        
+
     else:
         await update.message.reply_text("Неизвестная команда админа")
 
@@ -593,13 +660,13 @@ async def handle_admin_message(update: Update, context: ContextTypes.DEFAULT_TYP
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений (кнопок)"""
     user = update.effective_user
-    
+
     if is_in_admin_mode(user.id):
         await handle_admin_message(update, context)
         return
-        
+
     text = update.message.text
-    
+
     if text == "🎤 Распознать голос":
         await update.message.reply_text(
             "Отправьте мне голосовое сообщение, аудиофайл, видео или кружочек для распознавания! 🎤",
@@ -646,7 +713,7 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик аудиосообщений и аудиофайлов"""
     user = update.effective_user
-    
+
     if is_in_admin_mode(user.id):
         await update.message.reply_text(
             "❌ В режиме администратора распознавание аудио недоступно.\n"
@@ -670,53 +737,58 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Пожалуйста, отправьте голосовое сообщение или аудиофайл")
         return
-    
+
     if audio_file.file_size > config.MAX_FILE_SIZE:
-        await update.message.reply_text(f"❌ Файл слишком большой! Максимальный размер: {config.MAX_FILE_SIZE // (1024*1024)} МБ")
+        await update.message.reply_text(
+            f"❌ Файл слишком большой! Максимальный размер: {config.MAX_FILE_SIZE // (1024 * 1024)} МБ")
         return
-    
+
     user_language = get_user_language(user.id)
     enhancement_group = ab_testing.assign_group(user.id, "text_enhancement_method")
-    
+
     processing_msg = await update.message.reply_text(
         f"⏳ Обрабатываю {file_type}...\n"
         f"📏 Размер: {audio_file.file_size // 1024} КБ\n"
         f"🌍 Язык: {user_language.upper()}\n"
         "Это займет некоторое время..."
     )
-    
+
     temp_audio_path = None
     request_id = None
-    
+
     try:
-        telegram_file = await audio_file.get_file()
-        temp_audio_path = await AudioProcessor.process_telegram_audio(telegram_file)
-        
+        # ⚠️ ВАЖНО: получаем файл ДО блока try
+        telegram_file = await audio_file.get_file()  # ← ЭТУ СТРОКУ ДОБАВЬТЕ
+
+        audio_processor = AudioProcessor()
+        temp_audio_path = await audio_processor.process_telegram_audio(telegram_file)
+
         if not temp_audio_path:
             await processing_msg.edit_text("❌ Ошибка при обработке аудио")
             return
-        
+
         cached_result = None
         if config.CACHE_ENABLED:
             cached_result = cache_manager.get(temp_audio_path, user_language)
-        
+
         if cached_result:
             recognized_text = cached_result
             logger.info("✅ Использован кэшированный результат")
         else:
             task_id = f"{user.id}_{datetime.now().timestamp()}"
             recognized_text = await processing_queue.add_task(
-                task_id, 
-                recognizer.recognize_audio, 
-                temp_audio_path, 
+                task_id,
+                recognizer.recognize_audio,
+                temp_audio_path,
                 user_language
             )
-            
+
             if config.CACHE_ENABLED and recognized_text and "Ошибка" not in recognized_text:
                 cache_manager.set(temp_audio_path, user_language, recognized_text)
-        
-        duration = AudioProcessor.get_audio_duration(temp_audio_path)
-        
+
+        duration = audio_processor.get_audio_duration(temp_audio_path) if hasattr(audio_processor,
+                                                                                  'get_audio_duration') else 0
+
         final_text = recognized_text
         if recognized_text and "Ошибка" not in recognized_text and "Не удалось" not in recognized_text:
             try:
@@ -727,14 +799,14 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     final_text = plugin_result['text']
                 else:
                     final_text = recognized_text
-                
+
                 logger.info(f"✅ Текст улучшен методом: {enhancement_group}")
             except Exception as e:
                 logger.error(f"Ошибка улучшения текста: {e}")
                 final_text = recognized_text
-        
+
         request_id = db.add_audio_request(user.id, audio_file.file_id, audio_file.file_size, duration, final_text)
-        
+
         if final_text and "Ошибка" not in final_text and "Не удалось" not in final_text:
             response_text = (
                 f"✅ Распознано успешно!\n"
@@ -742,16 +814,16 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🧪 Метод: {enhancement_group}\n"
                 f"📝 Текст:\n\n{final_text}"
             )
-            
+
             feedback_keyboard = {
                 "inline_keyboard": [[
                     {"text": "👍 Хорошо", "callback_data": f"feedback_{request_id}_5"},
                     {"text": "👎 Плохо", "callback_data": f"feedback_{request_id}_1"}
                 ]]
             }
-            
+
             if len(response_text) > 4000:
-                parts = [response_text[i:i+4000] for i in range(0, len(response_text), 4000)]
+                parts = [response_text[i:i + 4000] for i in range(0, len(response_text), 4000)]
                 for i, part in enumerate(parts):
                     if i == len(parts) - 1:
                         await update.message.reply_text(part, reply_markup=feedback_keyboard)
@@ -759,7 +831,7 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await update.message.reply_text(part)
             else:
                 await update.message.reply_text(response_text, reply_markup=feedback_keyboard)
-            
+
             ab_testing.track_result(
                 "text_enhancement_method",
                 user.id,
@@ -771,41 +843,41 @@ async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     'duration': duration
                 }
             )
-            
+
         else:
             error_response = "❌ Не удалось распознать речь. Попробуйте записать в более тихом месте."
             await update.message.reply_text(error_response)
-            
+
             ab_testing.track_result(
                 "text_enhancement_method",
                 user.id,
                 enhancement_group,
                 success=False
             )
-    
+
     except Exception as e:
         error_msg = log_error("Audio processing error", e, update)
         await update.message.reply_text("❌ Произошла ошибка при обработке аудио.")
-        
+
         ab_testing.track_result(
             "text_enhancement_method",
             user.id,
             enhancement_group,
             success=False
         )
-    
+
     finally:
         if temp_audio_path and os.path.exists(temp_audio_path):
             try:
                 os.remove(temp_audio_path)
             except Exception as e:
                 logger.error(f"Ошибка удаления временного файла: {e}")
-        
+
         try:
             await processing_msg.delete()
         except:
             pass
-        
+
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
         gc.collect()
 
@@ -814,16 +886,16 @@ async def handle_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик обратной связи"""
     query = update.callback_query
     await query.answer()
-    
+
     data = query.data
     if data.startswith('feedback_'):
         parts = data.split('_')
         if len(parts) == 3:
             request_id = parts[1]
             rating = int(parts[2])
-            
+
             db.add_feedback(request_id, rating)
-            
+
             if rating >= 4:
                 await query.edit_message_text(
                     query.message.text + "\n\n✅ Спасибо за вашу оценку!"
@@ -839,21 +911,21 @@ def main():
     try:
         if not check_system_requirements():
             logger.warning("⚠️  Запуск с отсутствующими зависимостями может привести к ошибкам")
-        
+
         logger.info("🚀 Запуск бота...")
-        
+
         db.init_db()
         logger.info("✅ База данных инициализирована")
-        
+
         # Создаем новый event loop для главного потока
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
         # Запускаем сервисы в event loop
         loop.run_until_complete(start_services())
-        
+
         application = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
-        
+
         application.add_handler(CommandHandler("start", start_command))
         application.add_handler(CommandHandler("help", help_command))
         application.add_handler(CommandHandler("stats", stats_command))
@@ -862,21 +934,21 @@ def main():
         application.add_handler(CommandHandler("admin", admin_command))
         application.add_handler(CommandHandler("batch", batch_command))
         application.add_handler(CommandHandler("voice", voice_command))
-        
+
         application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_audio))
         application.add_handler(MessageHandler(filters.VIDEO, handle_video))
         application.add_handler(MessageHandler(filters.VIDEO_NOTE, handle_video_note))
-        
+
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
         application.add_handler(CallbackQueryHandler(handle_feedback, pattern="^feedback_"))
-        
+
         application.add_error_handler(error_handler)
-        
+
         logger.info("🤖 Бот запускается...")
-        
+
         # Запускаем бота в event loop
         loop.run_until_complete(application.run_polling())
-        
+
     except Exception as e:
         logger.error(f"❌ Критическая ошибка при запуске: {e}")
         raise
