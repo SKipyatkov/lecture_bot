@@ -1,9 +1,13 @@
 # Virtual environment
 venv/
+.venv/
 .env
 
 # Vosk models
 models/
+
+# Runtime data (database, logs, cache, backups)
+data/
 
 # Database
 *.db

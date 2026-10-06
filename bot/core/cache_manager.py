@@ -6,6 +6,8 @@ from typing import Any, Optional, Dict
 from datetime import datetime, timedelta
 import shutil
 
+from .paths import CACHE_DIR
+
 logger = logging.getLogger(__name__)
 
 class CacheManager:
@@ -230,4 +232,4 @@ class CacheManager:
             logger.info(f"🔧 Кэш оптимизирован, удалено ~{files_to_delete} файлов")
 
 # Глобальный менеджер кэша
-cache_manager = CacheManager()
+cache_manager = CacheManager(cache_dir=str(CACHE_DIR))

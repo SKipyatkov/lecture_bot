@@ -2,40 +2,41 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+from .paths import DATA_DIR, LOG_DIR, PROJECT_ROOT, TEMP_DIR
+
+load_dotenv(PROJECT_ROOT / ".env")
+
+
+def _resolve_path(value: str) -> str:
+    path = Path(value)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return str(path)
 
 
 class Config:
-    # Базовый путь проекта
-    BASE_DIR = Path(__file__).parent
+    # Корень репозитория и каталог данных (база, логи, кэш, бэкапы)
+    BASE_DIR = PROJECT_ROOT
+    DATA_DIR = DATA_DIR
+    LOG_DIR = LOG_DIR
 
     # Токен бота из .env файла
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
     # Пути к внешним зависимостям
-    # FFmpeg
-    FFMPEG_PATH = "ffmpeg"  # или os.getenv('FFMPEG_PATH', 'ffmpeg')
+    FFMPEG_PATH = os.getenv('FFMPEG_PATH', 'ffmpeg')
 
     # eSpeak
     ESPEAK_PATH = os.getenv('ESPEAK_PATH', 'espeak')
 
-    # Пути к моделям Vosk - АБСОЛЮТНЫЕ пути
-    VOSK_MODEL_PATHS = {
-        'ru': os.getenv('VOSK_MODEL_PATH_RU', r'C:\projects\lecture_bot\models\vosk-model-ru-0.42'),
-        'en': os.getenv('VOSK_MODEL_PATH_EN', r'C:\projects\lecture_bot\models\vosk-model-en-us-0.42-gigaspeech')
-    }
-
-    # Проверка существования моделей
-    @classmethod
-    def check_models_exist(cls):
-        missing_models = []
-        for lang, path in cls.VOSK_MODEL_PATHS.items():
-            if not os.path.exists(path):
-                missing_models.append((lang, path))
-        return missing_models
+    # Мультиязычная модель Whisper. Относительный путь считается от корня репозитория.
+    WHISPER_MODEL_PATH = _resolve_path(os.getenv(
+        'WHISPER_MODEL_PATH',
+        'models/faster-whisper-small',
+    ))
 
     # Временная папка для файлов
-    TEMP_DIR = BASE_DIR / "temp"
+    TEMP_DIR = TEMP_DIR
 
     # Максимальный размер файла (20 МБ по умолчанию)
     MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 20971520))
@@ -57,10 +58,6 @@ class Config:
     # Настройки плагинов
     PLUGINS_ENABLED = os.getenv('PLUGINS_ENABLED', 'true').lower() == 'true'
 
-    # Поддерживаемые языки
-    SUPPORTED_LANGUAGES = ['ru', 'en']
-    DEFAULT_LANGUAGE = 'ru'
-
     # Поддерживаемые типы файлов
     SUPPORTED_FILE_TYPES = ['voice', 'audio', 'video', 'video_note']
     MAX_VIDEO_DURATION = 600  # 10 минут максимальная длительность видео
@@ -75,54 +72,12 @@ class Config:
         'aggressive_nr': True
     }
 
-    # Настройки Vosk для улучшения распознавания
-    VOSK_SETTINGS = {
-        'max_alternatives': 5,
-        'words': True,
-        'partial_results': True,
-        'speech_timeout': 0.3,
-        'min_confidence': 0.6
-    }
-
-    # Клавиатура главного меню
-    MAIN_MENU = {
-        "keyboard": [
-            ["🎤 Распознать голос", "📊 Статистика"],
-            ["🗃️ Пакетная обработка", "🔊 Озвучить текст"],
-            ["❓ Помощь", "⚙️ Настройки", "🌍 Язык"]
-        ],
-        "resize_keyboard": True
-    }
-
-    # Клавиатура администратора
-    ADMIN_MENU = {
-        "keyboard": [
-            ["📊 Общая статистика", "👥 Пользователи"],
-            ["📋 Логи", "🔄 Перезагрузка", "🌐 Веб-панель"],
-            ["💾 Создать бэкап", "⏹️ Остановка", "🔙 Назад"]
-        ],
-        "resize_keyboard": True
-    }
-
-    # Клавиатура выбора языка
-    LANGUAGE_MENU = {
-        "keyboard": [
-            ["🇷🇺 Русский", "🇺🇸 English"],
-            ["🔙 Назад"]
-        ],
-        "resize_keyboard": True
-    }
-
     # Список команд для регистрации в боте
     COMMANDS = [
-        ("start", "Запустить бота"),
-        ("stats", "Показать статистику"),
-        ("help", "Показать справку"),
-        ("settings", "Настройки бота"),
-        ("language", "Сменить язык"),
-        ("admin", "Панель администратора"),
-        ("batch", "Пакетная обработка"),
-        ("voice", "Озвучить текст")
+        ("start", "Начать"),
+        ("stats", "Моя статистика"),
+        ("help", "Как пользоваться"),
+        ("settings", "Как устроена расшифровка"),
     ]
 
     # Проверяем, что токен есть
@@ -132,7 +87,8 @@ class Config:
     # Создаем временную папку если её нет
     @classmethod
     def init_temp_dir(cls):
-        cls.TEMP_DIR.mkdir(exist_ok=True)
+        for directory in (cls.DATA_DIR, cls.LOG_DIR, cls.TEMP_DIR):
+            directory.mkdir(parents=True, exist_ok=True)
 
 
 # Создаем экземпляр конфигурации

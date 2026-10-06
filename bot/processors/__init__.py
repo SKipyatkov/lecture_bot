@@ -2,8 +2,7 @@
 processors/__init__.py
 """
 
-from .vosk_recognizer import VoskRecognizer
+from .whisper_recognizer import WhisperRecognizer
 from .audio_processor import AudioProcessor
-from .text_enhancer import TextEnhancer
 
-__all__ = ['VoskRecognizer', 'AudioProcessor', 'TextEnhancer']
+__all__ = ['WhisperRecognizer', 'AudioProcessor']

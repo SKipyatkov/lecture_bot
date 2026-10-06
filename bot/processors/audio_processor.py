@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class AudioProcessor:
     """Класс для обработки аудиофайлов"""
     
-    def __init__(self):
-        self.temp_dir = tempfile.gettempdir()
+    def __init__(self, temp_dir: str | None = None):
+        self.temp_dir = temp_dir or tempfile.gettempdir()
         self.thread_pool = ThreadPoolExecutor(max_workers=3)
         
     async def process_telegram_audio(self, telegram_file):
@@ -68,33 +68,38 @@ class AudioProcessor:
     async def _download_telegram_file(self, telegram_file):
         """Скачивание файла из Telegram"""
         try:
-            # Получаем информацию о файле
             file_id = telegram_file.file_id
             file_size = telegram_file.file_size
-            
-            # Создаем временный файл
             temp_file = tempfile.NamedTemporaryFile(
-                delete=False, 
+                delete=False,
                 suffix='.download',
                 dir=self.temp_dir
             )
             temp_path = temp_file.name
             temp_file.close()
-            
-            # Скачиваем файл
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                self.thread_pool,
-                lambda: telegram_file.download(custom_path=temp_path)
-            )
-            
+            await telegram_file.download_to_drive(custom_path=temp_path)
             logger.debug(f"✅ Файл {file_id} скачан: {temp_path} ({file_size} bytes)")
             return temp_path
-            
         except Exception as e:
             logger.error(f"❌ Ошибка скачивания файла: {e}")
             return None
-            
+
+    def convert_to_wav_file(self, input_path: str, output_path: str) -> None:
+        """Синхронная конвертация в mono WAV 16 кГц."""
+        (
+            ffmpeg
+            .input(input_path)
+            .output(
+                output_path,
+                ac=1,
+                ar='16000',
+                acodec='pcm_s16le',
+                loglevel='error'
+            )
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+
     async def _convert_to_wav(self, input_path):
         """Конвертация аудио в WAV формат"""
         try:
@@ -105,23 +110,11 @@ class AudioProcessor:
             ).name
             
             loop = asyncio.get_event_loop()
-            
-            # Используем ffmpeg для конвертации
             await loop.run_in_executor(
                 self.thread_pool,
-                lambda: (
-                    ffmpeg
-                    .input(input_path)
-                    .output(
-                        output_path,
-                        ac=1,           # моно
-                        ar='16000',     # 16kHz
-                        acodec='pcm_s16le',
-                        loglevel='error'
-                    )
-                    .overwrite_output()
-                    .run(capture_stdout=True, capture_stderr=True)
-                )
+                self.convert_to_wav_file,
+                input_path,
+                output_path,
             )
             
             logger.debug(f"✅ Аудио сконвертировано: {output_path}")

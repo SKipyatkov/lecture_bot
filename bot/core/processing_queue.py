@@ -1,11 +1,14 @@
 import asyncio
+import inspect
 import logging
-import threading
 from concurrent.futures import ThreadPoolExecutor
-from queue import Queue, Empty
-import time
+from functools import partial
 
 logger = logging.getLogger(__name__)
+
+
+class QueueFullError(Exception):
+    """Очередь не принимает новые задачи."""
 
 class ProcessingQueue:
     """Асинхронная очередь обработки задач"""
@@ -19,6 +22,7 @@ class ProcessingQueue:
         self.workers = []
         self.thread_pool = ThreadPoolExecutor(max_workers=max_workers)
         self.loop = None
+        self._inflight = 0
         
     async def start(self):
         """Запуск очереди обработки"""
@@ -48,10 +52,29 @@ class ProcessingQueue:
         self.thread_pool.shutdown(wait=True)
         logger.info("⏹️ Очередь обработки остановлена")
         
+    async def submit(self, func, *args, on_success=None, on_error=None, **kwargs):
+        """Ставит задачу в очередь и сразу возвращает управление.
+
+        Тяжёлая функция выполняется в пуле потоков. Колбэки вызываются
+        уже в event loop бота, поэтому из них можно писать в PostgreSQL
+        и отвечать в Telegram.
+        """
+        if self.task_queue.qsize() >= self.max_queue_size:
+            raise QueueFullError("Очередь переполнена")
+
+        await self.task_queue.put({
+            'func': func,
+            'args': args,
+            'kwargs': kwargs,
+            'future': None,
+            'on_success': on_success,
+            'on_error': on_error,
+        })
+
     async def add_task(self, task_id, func, *args, **kwargs):
         """Добавление задачи в очередь"""
         if self.task_queue.qsize() >= self.max_queue_size:
-            raise Exception("Очередь переполнена")
+            raise QueueFullError("Очередь переполнена")
             
         # Создаем future для результата
         future = asyncio.Future()
@@ -63,7 +86,9 @@ class ProcessingQueue:
             'func': func,
             'args': args,
             'kwargs': kwargs,
-            'future': future
+            'future': future,
+            'on_success': None,
+            'on_error': None,
         }
         
         await self.task_queue.put(task_data)
@@ -95,41 +120,34 @@ class ProcessingQueue:
                 except asyncio.TimeoutError:
                     continue
                     
-                task_id = task_data['task_id']
                 func = task_data['func']
                 args = task_data['args']
                 kwargs = task_data['kwargs']
-                future = task_data['future']
-                
-                logger.debug(f"🎯 {worker_name} обрабатывает задачу {task_id}")
-                
+                future = task_data.get('future')
+                on_success = task_data.get('on_success')
+                on_error = task_data.get('on_error')
+                self._inflight += 1
+
                 try:
-                    # Запускаем синхронную функцию в thread pool
-                    if asyncio.iscoroutinefunction(func):
-                        # Если функция асинхронная
+                    if inspect.iscoroutinefunction(func):
                         result = await func(*args, **kwargs)
                     else:
-                        # Если функция синхронная
                         result = await self.loop.run_in_executor(
-                            self.thread_pool, 
-                            func, 
-                            *args, 
-                            **kwargs
+                            self.thread_pool,
+                            partial(func, *args, **kwargs),
                         )
-                    
-                    # Устанавливаем результат
-                    if not future.done():
+
+                    if future is not None and not future.done():
                         future.set_result(result)
-                        
-                    logger.debug(f"✅ {worker_name} завершил задачу {task_id}")
-                    
+                    await self._invoke_callback(on_success, result)
                 except Exception as e:
-                    logger.error(f"❌ {worker_name} ошибка в задаче {task_id}: {e}")
-                    if not future.done():
+                    logger.error(f"❌ {worker_name} ошибка задачи: {e}")
+                    if future is not None and not future.done():
                         future.set_exception(e)
+                    await self._invoke_callback(on_error, e)
                         
                 finally:
-                    # Помечаем задачу как выполненную
+                    self._inflight = max(0, self._inflight - 1)
                     self.task_queue.task_done()
                     
             except asyncio.CancelledError:
@@ -139,12 +157,19 @@ class ProcessingQueue:
                 logger.error(f"❌ {worker_name} критическая ошибка: {e}")
                 continue
                 
+    async def _invoke_callback(self, callback, value):
+        if callback is None:
+            return
+        result = callback(value)
+        if asyncio.iscoroutine(result):
+            await result
+
     def get_queue_stats(self):
         """Получение статистики очереди"""
         return {
             'queue_size': self.task_queue.qsize(),
             'max_queue_size': self.max_queue_size,
-            'active_tasks': len([f for f in self.results.values() if not f.done()]),
+            'active_tasks': self._inflight,
             'workers': len(self.workers)
         }
         
